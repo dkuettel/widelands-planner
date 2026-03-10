@@ -1,5 +1,5 @@
 {
-  description = "TODO";
+  description = "widelands planner";
 
   inputs = {
     nixpkgs.url = "github:nixos/nixpkgs/nixos-25.11";
@@ -38,7 +38,7 @@
     flake-utils.lib.eachDefaultSystem (
       system:
       let
-        name = "TODO";
+        name = "wplan";
 
         pkgs = import nixpkgs {
           inherit system;
@@ -132,7 +132,7 @@
         inherit (pkgs.callPackages pyproject-nix.build.util { }) mkApplication;
         app = mkApplication {
           venv = venv;
-          package = modules.TODO;
+          package = modules.wplan;
         };
         # TODO this could help, but Im not sure its the best way to do it
         # wrappedApp = pkgs.writeScriptBin "TODO" ''
@@ -152,15 +152,10 @@
         packages.default = package;
         devShells.default = pkgs.mkShellNoCC {
           packages = [ devEnv ];
-          # TODO opengl is not always needed
-          LD_LIBRARY_PATH = "/run/opengl-driver/lib/:${pkgs.lib.makeLibraryPath [ devLdLibs ]}";
+          LD_LIBRARY_PATH = "${pkgs.lib.makeLibraryPath [ devLdLibs ]}";
           shellHook = ''
             if [[ -v h ]]; then
               export PATH=$h/bin:$PATH;
-              if [[ ! $h/.nd/state -ef $h/.nd/dev ]] then
-                # something
-                cp -d $h/.nd/dev $h/.nd/state
-              fi
             else
               echo 'Project root env var h is not set.' >&2
             fi
