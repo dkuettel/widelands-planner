@@ -132,7 +132,9 @@
         inherit (pkgs.callPackages pyproject-nix.build.util { }) mkApplication;
         app = mkApplication {
           venv = venv;
-          package = modules.wplan;
+          # TODO hmm this is the name of the project always?
+          # did I just always use the same name? can i not just pass one executable?
+          package = modules.widelands-planner;
         };
         # TODO this could help, but Im not sure its the best way to do it
         # wrappedApp = pkgs.writeScriptBin "TODO" ''

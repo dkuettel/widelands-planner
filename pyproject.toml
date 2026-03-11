@@ -3,11 +3,11 @@ name = "widelands-planner"
 version = "0.1.0"
 description = "Add your description here"
 readme = "README.md"
-authors = [
-    { name = "Daniel Kuettel", email = "dkuettel@gmail.com" }
-]
+authors = [{ name = "Daniel Kuettel", email = "dkuettel@gmail.com" }]
 requires-python = ">=3.14"
-dependencies = []
+dependencies = [
+    "streamlit>=1.55.0",
+]
 
 [project.scripts]
 wplan = "widelands_planner:main"
@@ -15,3 +15,6 @@ wplan = "widelands_planner:main"
 [build-system]
 requires = ["uv_build>=0.9.29,<0.10.0"]
 build-backend = "uv_build"
+
+[tool.pyright]
+reportUnusedCallResult = false
