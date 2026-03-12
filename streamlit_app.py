@@ -19,6 +19,11 @@ requires = {
     "brick kiln": {"clay pit": 2.1, "coal": 0.5, "granite": 0.5},
 }
 
+required: dict[str, set[str]] = dict()
+for b, r in requires.items():
+    for rb in r:
+        required.setdefault(rb, set()).add(b)
+
 names = st.data_editor(["main"], num_rows="dynamic")
 
 for name, tab in zip(names, st.tabs(names), strict=True):
@@ -41,4 +46,12 @@ for name, tab in zip(names, st.tabs(names), strict=True):
 
         if needs:
             st.title("actions")
-            st.write({b: round(n, 1) for b, n in needs.items()})
+            st.write(
+                {
+                    b: {
+                        "add": round(n, 1),
+                        "for": required.get(b, set()),
+                    }
+                    for b, n in needs.items()
+                }
+            )
