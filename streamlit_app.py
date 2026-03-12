@@ -15,11 +15,16 @@ buildings = {
     "granite",
     "reed farm",
     "tavern (fish, fruit)",
+    "tavern (fish, bread)",
     "water",
     "woodcutter",
     "smokery",
     "fishery",
     "fruit",
+    "bakery",
+    "farm",
+    "brewery",  # TODO no requires yet
+    "beekeeper",  # TODO no requires yet
 }
 
 requires = {
@@ -30,6 +35,14 @@ requires = {
     "tavern (fish, fruit)": {
         "smokery": 27 / (2 * 37),
         "fruit": ((37 + 62) / 2) / (2 * 37),
+    },
+    "tavern (fish, bread)": {
+        "smokery": 27 / (2 * 37),
+        "bakery": 44 / (2 * 37),
+    },
+    "bakery": {
+        "farm": ((49 + 67) / 2) / 44,
+        "water": 44 / 44,
     },
     "smokery": {
         "fishery": ((26 + 59) / 2) / (27),
