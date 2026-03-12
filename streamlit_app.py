@@ -36,11 +36,9 @@ for name, tab in zip(names, st.tabs(names), strict=True):
             for nb, nc in requires.get(b, dict()).items():
                 needs[nb] = needs.get(nb, 0.0) + c * nc
         needs = {
-            b: round(c - counts.get(b, 0), 1)
-            for b, c in needs.items()
-            if c > counts.get(b, 0)
+            b: (c - counts.get(b, 0)) for b, c in needs.items() if c > counts.get(b, 0)
         }
 
         if needs:
             st.title("actions")
-            st.write(needs)
+            st.write({b: round(n, 1) for b, n in needs.items()})
