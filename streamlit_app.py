@@ -8,20 +8,34 @@ import streamlit as st
 from streamlit.delta_generator import DeltaGenerator
 
 buildings = {
-    "forester",
-    "woodcutter",
-    "water",
-    "clay pit",
     "brick kiln",
+    "clay pit",
     "coal",
+    "forester",
     "granite",
     "reed farm",
+    "tavern (fish, fruit)",
+    "water",
+    "woodcutter",
+    "smokery",
+    "fishery",
+    "fruit",
 }
 
 requires = {
-    "woodcutter": {"forester": 0.5},
-    "clay pit": {"water": 0.7},
     "brick kiln": {"clay pit": 2.1, "coal": 0.5, "granite": 0.5},
+    "clay pit": {"water": 0.7},
+    "coal": {"tavern (fish, fruit)": 37 / (2 * 41)},
+    "granite": {"tavern (fish, fruit)": 37 / (2 * 46)},
+    "tavern (fish, fruit)": {
+        "smokery": 27 / (2 * 37),
+        "fruit": ((37 + 62) / 2) / (2 * 37),
+    },
+    "smokery": {
+        "fishery": ((26 + 59) / 2) / (27),
+        "woodcutter": ((49 + 89) / 2) / (2 * 27),
+    },
+    "woodcutter": {"forester": 0.5},
 }
 
 required: dict[str, set[str]] = dict()
