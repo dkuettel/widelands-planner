@@ -10,6 +10,7 @@ buildings = {
     "brick kiln",
     "coal",
     "granite",
+    "reed farm",
 }
 
 requires = {
