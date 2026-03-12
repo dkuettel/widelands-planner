@@ -49,22 +49,27 @@ if path.exists():
 else:
     state = State.from_defaults()
 
+# TODO this doesnt quite work, only every second edit works?
 state.names = st.data_editor(state.names, num_rows="dynamic")
+names = [n for n in state.names if n is not None]  # pyright: ignore[reportUnnecessaryComparison]
 
-for name, tab in zip(state.names, st.tabs(state.names), strict=True):
+for name, tab in zip(names, st.tabs(names), strict=True):
     with tab:
         state.counts.setdefault(name, dict())
         actions: dict[str, DeltaGenerator] = dict()
         for b in sorted(buildings):
-            col1, col2 = st.columns([0.3, 0.7], border=True)
+            col1, col2, col3 = st.columns([2, 2, 3], border=True)
             with col1:
+                st.write(b)
+            with col2:
                 state.counts[name][b] = st.number_input(
                     label=b,
                     min_value=0,
                     value=state.counts.get(name, dict()).get(b, 0),
                     key=f"{name}/{b}",
+                    label_visibility="collapsed",
                 )
-            with col2:
+            with col3:
                 actions[b] = st.empty()
 
         needs: dict[str, float] = dict()
