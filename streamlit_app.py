@@ -60,8 +60,6 @@ for name, tab in zip(names, st.tabs(names), strict=True):
         for b in sorted(buildings):
             col1, col2, col3 = st.columns([2, 2, 3], border=True)
             with col1:
-                st.write(b)
-            with col2:
                 state.counts[name][b] = st.number_input(
                     label=b,
                     min_value=0,
@@ -69,6 +67,8 @@ for name, tab in zip(names, st.tabs(names), strict=True):
                     key=f"{name}/{b}",
                     label_visibility="collapsed",
                 )
+            with col2:
+                st.write(b)
             with col3:
                 actions[b] = st.empty()
 
