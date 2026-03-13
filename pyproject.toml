@@ -6,6 +6,8 @@ readme = "README.md"
 authors = [{ name = "Daniel Kuettel", email = "dkuettel@gmail.com" }]
 requires-python = ">=3.14"
 dependencies = [
+    "numpy>=2.4.3",
+    "pandas>=2.3.3",
     "streamlit>=1.55.0",
 ]
 

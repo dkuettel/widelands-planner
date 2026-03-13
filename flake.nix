@@ -83,7 +83,7 @@
 
         devLibs = with pkgs; [
           stdenv.cc.cc
-          # zlib
+          zlib
           # libglvnd
           # xorg.libX11
           # glib
@@ -103,19 +103,20 @@
         pyproject = uv2nix.lib.workspace.loadWorkspace { workspaceRoot = ./.; };
         moduleOverrides =
           final: prev:
-          # let
-          #   # see https://github.com/TyberiusPrime/uv2nix_hammer_overrides/tree/main
-          #   # I dont fully understand what we do here, we switch to setuptools instead of wheels?
-          #   # for libs that need to build for nix? and we might have to add build dependencies?
-          #   setuptools =
-          #     prev_lib:
-          #     prev_lib.overrideAttrs (old: {
-          #       nativeBuildInputs =
-          #         (old.nativeBuildInputs or [ ]) ++ (final.resolveBuildSystem { setuptools = [ ]; });
-          #     });
-          # in
+          let
+            # see https://github.com/TyberiusPrime/uv2nix_hammer_overrides/tree/main
+            # I dont fully understand what we do here, we switch to setuptools instead of wheels?
+            # for libs that need to build for nix? and we might have to add build dependencies?
+            setuptools =
+              prev_lib:
+              prev_lib.overrideAttrs (old: {
+                nativeBuildInputs =
+                  (old.nativeBuildInputs or [ ]) ++ (final.resolveBuildSystem { setuptools = [ ]; });
+              });
+          in
           {
-            # pprofile = setuptools prev.pprofile;
+            pandas = setuptools prev.pandas;
+            numpy = setuptools prev.numpy;
           };
         modules =
           (pkgs.callPackage pyproject-nix.build.packages {
