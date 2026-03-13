@@ -7,6 +7,24 @@ from pathlib import Path
 import streamlit as st
 from streamlit.delta_generator import DeltaGenerator
 
+with st.container(border=True):
+    with st.container(horizontal=True, vertical_alignment="center", border=False):
+        st.button("-", type="secondary")
+        st.button("+", type="secondary")
+        st.write("12 @ 80% = 10")
+        st.write("brick kiln")
+    with st.container(border=True):
+        with st.container(horizontal=True, vertical_alignment="center", border=False):
+            st.button("-", type="secondary", key="aa")
+            st.button("+", type="secondary", key="bb")
+            st.write("12 @ 80% = 10")
+            st.write("clay pit")
+        with st.container(horizontal=True, vertical_alignment="center", border=False):
+            st.button("-", type="secondary", key="aaa")
+            st.button("+", type="secondary", key="bbb")
+            st.write("12 @ 80% = 10")
+            st.write("clay pit")
+
 buildings = {
     "brick kiln",
     "clay pit",
