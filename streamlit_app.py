@@ -13,6 +13,7 @@ buildings = {
     "coal",
     "forester",
     "granite",
+    "iron",
     "reed farm",
     "tavern (fish, fruit)",
     "tavern (fish, bread)",
@@ -30,8 +31,10 @@ buildings = {
 requires = {
     "brick kiln": {"clay pit": 2.1, "coal": 0.5, "granite": 0.5},
     "clay pit": {"water": 0.7},
+    # TODO hmm also name by what they eat now? would allow to be explicit
     "coal": {"tavern (fish, fruit)": 37 / (2 * 41)},
     "granite": {"tavern (fish, fruit)": 37 / (2 * 46)},
+    "iron": {"tavern (fish, fruit)": 37 / 69},
     "tavern (fish, fruit)": {
         "smokery": 27 / (2 * 37),
         "fruit": ((37 + 62) / 2) / (2 * 37),
