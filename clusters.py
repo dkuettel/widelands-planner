@@ -1,11 +1,49 @@
 from __future__ import annotations
 
+from dataclasses import dataclass
 from datetime import datetime
+from typing import NewType
 
 import polars as pl
 import streamlit as st
 
 st.write(datetime.now())
+
+BuildingName = NewType("BuildingName", str)
+ClusterName = NewType("ClusterName", str)
+
+
+@dataclass
+class Bvec:
+    data: dict[BuildingName, float]
+
+    @staticmethod
+    def from_args(**kwargs: float):
+        return {BuildingName(name): value for name, value in kwargs.items()}
+
+    def mul(self, vec: Bvec) -> Bvec:
+        buildings = self.data.keys() & vec.data.keys()
+        return Bvec({b: (self.data[b] * vec.data[b]) for b in buildings})
+
+
+@dataclass
+class Cluster:
+    local: set[BuildingName]
+    counts: Bvec
+
+
+clusters: dict[ClusterName, Cluster] = dict()
+
+
+@dataclass(frozen=True)
+class SituatedBuilding:
+    building: BuildingName
+    cluster: ClusterName | None
+
+# TODO the new way
+# - global plain spreadsheet
+# - but tetris-like you can turn "full blocks" into isolated things, just like you would have manually, they dont leak anymore
+# - and again we can embrace linear fashion most likely
 
 needs = pl.DataFrame(
     [

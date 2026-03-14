@@ -22,3 +22,4 @@ build-backend = "uv_build"
 [tool.pyright]
 reportUnusedCallResult = false
 reportUnknownMemberType = false # because of pandas
+reportAny = false               # st.session_state
