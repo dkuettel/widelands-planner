@@ -38,6 +38,7 @@ block_infos: dict[str, BlockInfo] = {
         {"granite", "coal"},
     ),
     "wood": BlockInfo({"forester", "woodcutter"}, {"woodcutter"}, set()),
+    "mining": BlockInfo({"coal", "granite"}, {"coal", "granite"}, set()),
 }
 
 
@@ -109,6 +110,7 @@ def main():
                                     f"{name} - imported",
                                     min_value=0,
                                     key=f"key/block/{block}/buildings/{name}",
+                                    # TODO hmm this could be non-zero from a previous type? and then you cant change it
                                     disabled=True,
                                 )
                             else:
@@ -145,7 +147,7 @@ def main():
             state.add_block()
             st.rerun()
 
-    st.header("totals")
+    st.header("summary")
     with st.container(horizontal=True):
         for building in sorted(buildings):
             count = sum(
@@ -153,6 +155,27 @@ def main():
                 for block in state.blocks()
             )
             st.write(count, building)
+
+    exports: dict[str, int] = dict()
+    for block in state.blocks():
+        block_type = st.session_state[f"key/block/{block}/type"]
+        for building in block_infos[block_type].exports:
+            exports[building] = exports.get(building, 0) + st.session_state.get(
+                f"key/block/{block}/buildings/{building}", 0
+            )
+
+    imports: dict[str, float] = dict()
+    for block in state.blocks():
+        block_type = st.session_state[f"key/block/{block}/type"]
+        needs: dict[str, float] = get_direct_needs(block)
+        for building in block_infos[block_type].imports:
+            imports[building] = imports.get(building, 0) + needs.get(building, 0)
+
+    with st.container(gap=None):
+        for building in buildings:
+            missing = imports.get(building, 0) - exports.get(building, 0)
+            if missing > 0:
+                st.write(f"missing {missing} {building}")
 
 
 if __name__ == "__main__":
