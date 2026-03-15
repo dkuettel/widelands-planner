@@ -4,6 +4,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from itertools import chain
 
+import polars as pl
 import streamlit as st
 from streamlit.delta_generator import DeltaGenerator
 
@@ -114,6 +115,11 @@ def st_block(block: Block) -> DeltaGenerator:
             min_value=0,
             key=block.name,
         )
+        with st.container(horizontal=True):
+            st.write("add:")
+            for name, count in block.buildings.items():
+                for i in range(count):
+                    st.checkbox(f"{name} {i}")
         return st.empty()
 
 
@@ -179,6 +185,7 @@ def main():
                 st.write(f"{have}+{block_need - have} for blocks :warning:")
 
     # TODO make a summary with clickable "dones"?
+    # TODO we could directly count things inside blocks, makes it easier to incrementally move?
 
 
 if __name__ == "__main__":
