@@ -117,9 +117,29 @@ def st_block(block: Block) -> DeltaGenerator:
         return st.empty()
 
 
+def get_block_totals(
+    buildings: dict[str, Building], blocks: dict[str, Block]
+) -> dict[str, int]:
+    block_totals = {name: 0 for name in buildings}
+    for block in blocks.values():
+        for name, ratio in block.buildings.items():
+            block_totals[name] += st.session_state.get(block.name, 0) * ratio
+    return block_totals
+
+
+def get_direct_needs(buildings: dict[str, Building]) -> dict[str, float]:
+    needs: dict[str, float] = dict()
+    for building in buildings.values():
+        for name, count in building.needs.items():
+            needs[name] = (
+                needs.get(name, 0) + st.session_state.get(building.name, 0) * count
+            )
+    return needs
+
+
 def main():
-    buildings = get_buildings()
-    blocks = get_blocks()
+    buildings: dict[str, Building] = get_buildings()
+    blocks: dict[str, Block] = get_blocks()
 
     building_infos: dict[str, DeltaGenerator] = dict()
     block_infos: dict[str, DeltaGenerator] = dict()
@@ -137,43 +157,28 @@ def main():
             for _name, block in sorted(blocks.items()):
                 block_infos[block.name] = st_block(block)
 
-    block_totals = {name: 0 for name in buildings}
-    for block in blocks.values():
-        for name, ratio in block.buildings.items():
-            block_totals[name] += st.session_state.get(block.name, 0) * ratio
+    direct_needs: dict[str, float] = get_direct_needs(buildings)
+    block_totals: dict[str, int] = get_block_totals(buildings, blocks)
 
-    for name, count in block_totals.items():
+    for name, g in building_infos.items():
         have = st.session_state.get(name, 0)
-        if count <= have:
-            building_infos[name].write(f"{count} for blocks")
+        direct_need = direct_needs.get(name, 0)
+        block_need = block_totals.get(name, 0)
+        flag = ""
+        if have == 0:
+            usage = "+++"
         else:
-            building_infos[name].write(f"{have}+{count - have} for blocks :warning:")
+            usage = round(100 * direct_need / have)
+            if usage > 100:
+                flag = ":warning:"
+        with g.container(gap=None):
+            st.write(f"usage {usage}% or {have}{direct_need - have:+.1f} {flag}")
+            if have >= block_need:
+                st.write(f"{block_need} for blocks")
+            else:
+                st.write(f"{have}+{block_need - have} for blocks :warning:")
 
-    # TODO actually compute total direct needs and make diff
-    # time to make main() and funcs, and maybe push pyright on a bit more again
-    for thing in chain(buildings.values(), blocks.values()):
-        # TODO how to handle options? we only go one step, no recursion, so we just list all of then
-        # and once one is instantiated, the others disappear?
-        for name, count in thing.needs.items():
-            diff = st.session_state.get(thing.name, 0) * count - st.session_state.get(
-                name, 0
-            )
-            if diff > 0:
-                st.write(f"{thing.name} needs {diff} more {name}")
-
-    # with st.container(border=False):
-    #     st.title("totals")
-    #     totals = {name: st.session_state.get(name, 0) for name in buildings}
-    #     for block, counts in blocks.items():
-    #         for name, ratio in counts.items():
-    #             totals[name] += st.session_state.get(f"block {block}", 0) * ratio
-    #     # st.json(totals)
-    #     with st.container(horizontal=True):
-    #         for name, count in sorted(totals.items()):
-    #             st.write(count, name)
-    #             building_infos[name].write(f"usage 80% = {count * 0.8:.1f}/{round(count)}")
-
-    # st.write(st.session_state)
+    # TODO make a summary with clickable "dones"?
 
 
 if __name__ == "__main__":
