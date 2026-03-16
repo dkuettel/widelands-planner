@@ -113,6 +113,7 @@ def st_block(
     bbcount = partial(get_block_building, bid)
 
     with st.expander(
+        # TODO if we compute all up front (a state after all?) then we can have :warning: here if there is at least one
         label=get_block_label(bid),
         expanded=True,
         key=bkey("expander"),
