@@ -73,7 +73,11 @@ def main():
 
     st.title("blocks")
     for block in state.blocks():
-        with st.container(border=True):
+        label = st.session_state.get(f"key/block/{block}/type", "")
+        name = st.session_state.get(f"key/block/{block}/name", "")
+        if name:
+            label = f'{label} **"{name}"**'
+        with st.expander(label, expanded=True, key=f"key/block/{block}/expander"):
             with st.container(horizontal=True, vertical_alignment="bottom"):
                 block_type = st.selectbox(
                     "type", sorted(block_infos), key=f"key/block/{block}/type"
