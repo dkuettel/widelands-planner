@@ -83,43 +83,45 @@ def get_direct_needs(block: int) -> dict[BuildingName, float]:
 
 def main():
     st.title("blocks")
-    for block in get_block_ids():
-        label = get_block_type(block)
-        name = get_block_name(block)
+    for block_id in get_block_ids():
+        label = get_block_type(block_id)
+        name = get_block_name(block_id)
         if name:
             label = f'{label} **"{name}"**'
-        with st.expander(label, expanded=True, key=f"key/block/{block}/expander"):
+        with st.expander(label, expanded=True, key=f"key/block/{block_id}/expander"):
             with st.container(horizontal=True, vertical_alignment="bottom"):
-                st.selectbox("type", sorted(block_infos), key=f"key/block/{block}/type")
-                st.text_input(
-                    f"name for block id {block}", key=f"key/block/{block}/name"
+                st.selectbox(
+                    "type", sorted(block_infos), key=f"key/block/{block_id}/type"
                 )
-                if st.button("delete", key=f"key/block/{block}/delete"):
-                    delete_block(block)
+                st.text_input(
+                    f"name for block id {block_id}", key=f"key/block/{block_id}/name"
+                )
+                if st.button("delete", key=f"key/block/{block_id}/delete"):
+                    delete_block(block_id)
                     st.rerun()
             with st.container(horizontal=True):
-                needs: dict[BuildingName, float] = get_direct_needs(block)
+                needs: dict[BuildingName, float] = get_direct_needs(block_id)
                 for name in sorted(buildings):
                     if (
-                        name in get_block_info(block).buildings
+                        name in get_block_info(block_id).buildings
                         or st.session_state.get(
-                            f"key/block/{block}/buildings/{name}", 0
+                            f"key/block/{block_id}/buildings/{name}", 0
                         )
                         > 0
                         or needs.get(name, 0) > 0
                     ):
                         with st.container(border=True, width=200):
-                            if name in get_block_info(block).exports:
+                            if name in get_block_info(block_id).exports:
                                 st.number_input(
                                     f"{name} - exported",
                                     min_value=0,
-                                    key=f"key/block/{block}/buildings/{name}",
+                                    key=f"key/block/{block_id}/buildings/{name}",
                                 )
-                            elif name in get_block_info(block).imports:
+                            elif name in get_block_info(block_id).imports:
                                 st.number_input(
                                     f"{name} - imported",
                                     min_value=0,
-                                    key=f"key/block/{block}/buildings/{name}",
+                                    key=f"key/block/{block_id}/buildings/{name}",
                                     # TODO hmm this could be non-zero from a previous type? and then you cant change it
                                     disabled=True,
                                 )
@@ -127,14 +129,14 @@ def main():
                                 st.number_input(
                                     name,
                                     min_value=0,
-                                    key=f"key/block/{block}/buildings/{name}",
+                                    key=f"key/block/{block_id}/buildings/{name}",
                                 )
                             match needs.get(name, None):
                                 case None | 0 | 0.0:
                                     if (
-                                        name in get_block_info(block).exports
+                                        name in get_block_info(block_id).exports
                                         or st.session_state.get(
-                                            f"key/block/{block}/buildings/{name}", 0
+                                            f"key/block/{block_id}/buildings/{name}", 0
                                         )
                                         == 0
                                     ):
@@ -144,7 +146,7 @@ def main():
                                 case float(c) | int(c):
                                     if (
                                         st.session_state.get(
-                                            f"key/block/{block}/buildings/{name}", 0
+                                            f"key/block/{block_id}/buildings/{name}", 0
                                         )
                                         < c
                                     ):
@@ -167,17 +169,17 @@ def main():
             st.write(count, building)
 
     exports: dict[str, int] = dict()
-    for block in get_block_ids():
-        block_type = st.session_state[f"key/block/{block}/type"]
+    for block_id in get_block_ids():
+        block_type = st.session_state[f"key/block/{block_id}/type"]
         for building in block_infos[block_type].exports:
             exports[building] = exports.get(building, 0) + st.session_state.get(
-                f"key/block/{block}/buildings/{building}", 0
+                f"key/block/{block_id}/buildings/{building}", 0
             )
 
     imports: dict[str, float] = dict()
-    for block in get_block_ids():
-        block_type = st.session_state[f"key/block/{block}/type"]
-        needs: dict[BuildingName, float] = get_direct_needs(block)
+    for block_id in get_block_ids():
+        block_type = st.session_state[f"key/block/{block_id}/type"]
+        needs: dict[BuildingName, float] = get_direct_needs(block_id)
         for building in block_infos[block_type].imports:
             imports[building] = imports.get(building, 0) + needs.get(building, 0)
 
