@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import datetime
 from typing import Literal
 
 import streamlit as st
@@ -70,8 +69,6 @@ def get_direct_needs(block: int) -> dict[BuildingName, float]:
 
 
 def main():
-    st.write(datetime.now())
-
     state = State()
 
     st.title("blocks")
