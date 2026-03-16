@@ -2,11 +2,11 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime
+from typing import Literal
 
 import streamlit as st
 
-# TODO add sanity checks, or typing, that all buildings here and in other places are the same
-buildings: set[str] = {
+type BuildingName = Literal[
     "forester",
     "woodcutter",
     "clay pit",
@@ -14,9 +14,11 @@ buildings: set[str] = {
     "water",
     "coal",
     "granite",
-}
+]
 
-requires: dict[str, dict[str, float]] = {
+buildings: set[BuildingName] = set(BuildingName.__value__.__args__)
+
+requires: dict[BuildingName, dict[BuildingName, float]] = {
     "woodcutter": {"forester": 0.5},
     "clay pit": {"water": 0.7},
     "brick kiln": {"clay pit": 2.1, "coal": 0.5, "granite": 0.5},
@@ -25,10 +27,10 @@ requires: dict[str, dict[str, float]] = {
 
 @dataclass(frozen=True)
 class BlockInfo:
-    buildings: set[str]
+    buildings: set[BuildingName]
     # NOTE how to deal with stuff that is exported but also used?
-    exports: set[str]
-    imports: set[str]
+    exports: set[BuildingName]
+    imports: set[BuildingName]
 
 
 block_infos: dict[str, BlockInfo] = {
@@ -55,8 +57,8 @@ class State:
         blocks.remove(i)
 
 
-def get_direct_needs(block: int) -> dict[str, float]:
-    needs: dict[str, float] = dict()
+def get_direct_needs(block: int) -> dict[BuildingName, float]:
+    needs: dict[BuildingName, float] = dict()
     for building in buildings:
         for other, count in requires.get(building, {}).items():
             needs[other] = (
@@ -88,7 +90,7 @@ def main():
                     state.delete_block(block)
                     st.rerun()
             with st.container(horizontal=True):
-                needs: dict[str, float] = get_direct_needs(block)
+                needs: dict[BuildingName, float] = get_direct_needs(block)
                 for name in sorted(buildings):
                     if (
                         name in block_infos[block_type].buildings
@@ -167,7 +169,7 @@ def main():
     imports: dict[str, float] = dict()
     for block in state.blocks():
         block_type = st.session_state[f"key/block/{block}/type"]
-        needs: dict[str, float] = get_direct_needs(block)
+        needs: dict[BuildingName, float] = get_direct_needs(block)
         for building in block_infos[block_type].imports:
             imports[building] = imports.get(building, 0) + needs.get(building, 0)
 
