@@ -1,5 +1,5 @@
 /.nd/
 /Session.vim
 /result
-/state.pickle
+/state.json
 __pycache__/

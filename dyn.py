@@ -1,8 +1,11 @@
 from __future__ import annotations
 
+import json
 import math
+import pickle
 from dataclasses import dataclass
 from functools import partial
+from pathlib import Path
 from typing import Literal
 
 import streamlit as st
@@ -56,11 +59,11 @@ def delete_block(id: int):
 
 
 def get_block_type(id: int) -> str:
-    return st.session_state.setdefault(f"key/block/{id}/type", sorted(block_infos)[0])
+    return st.session_state.setdefault(f"state/block/{id}/type", sorted(block_infos)[0])
 
 
 def get_block_name(id: int) -> str:
-    return st.session_state.setdefault(f"key/block/{id}/name", "")
+    return st.session_state.setdefault(f"state/block/{id}/name", "")
 
 
 def get_block_info(id: int) -> BlockInfo:
@@ -68,7 +71,7 @@ def get_block_info(id: int) -> BlockInfo:
 
 
 def get_block_building(id: int, name: BuildingName) -> int:
-    return st.session_state.get(f"key/block/{id}/buildings/{name}", 0)
+    return st.session_state.get(f"state/block/{id}/buildings/{name}", 0)
 
 
 def get_direct_needs(block: int) -> dict[BuildingName, float]:
@@ -77,7 +80,7 @@ def get_direct_needs(block: int) -> dict[BuildingName, float]:
         for other, count in requires.get(building, {}).items():
             needs[other] = (
                 needs.get(other, 0)
-                + st.session_state.get(f"key/block/{block}/buildings/{building}", 0)
+                + st.session_state.get(f"state/block/{block}/buildings/{building}", 0)
                 * count
             )
     return needs
@@ -102,14 +105,14 @@ def get_building_totals() -> dict[BuildingName, int]:
 
 def key(*names: str | int) -> str:
     assert len(names) > 0
-    return "key/" + "/".join(map(str, names))
+    return "/".join(map(str, names))
 
 
 def st_block(
     bid: int, missing: dict[BuildingName, float], total_exports: dict[BuildingName, int]
 ):
-    bkey = partial(key, "block", bid)
-    bbkey = partial(key, "block", bid, "buildings")
+    bkey = partial(key, "state", "block", bid)
+    bbkey = partial(key, "state", "block", bid, "buildings")
     bbcount = partial(get_block_building, bid)
 
     with st.expander(
@@ -121,7 +124,7 @@ def st_block(
         with st.container(horizontal=True, vertical_alignment="bottom"):
             st.selectbox("type", sorted(block_infos), key=bkey("type"))
             st.text_input("name", key=bkey("name"))
-            if st.button("delete", key=bkey("delete")):
+            if st.button("delete", key=key("key", "block", bid, "delete")):
                 delete_block(bid)
                 st.rerun()
 
@@ -223,12 +226,30 @@ def main():
         name: (imports[name] - exports[name]) for name in buildings
     }
 
+    with st.container(horizontal=True, vertical_alignment="center"):
+        path = Path("state.json")
+        if st.button("save", key="key/save"):
+            path.write_text(
+                json.dumps(
+                    {
+                        k: v
+                        for k, v in st.session_state.to_dict().items()
+                        if k.startswith("state/")
+                    }
+                )
+            )
+        if st.button("load", key="key/load"):
+            for k, v in json.loads(path.read_text()).items():
+                st.session_state[k] = v
+            st.rerun()
+        st.write("from state.json at server root")
+
     st.title("blocks")
     for bid in get_block_ids():
         st_block(bid, missing, exports)
 
     with st.container(horizontal=False, horizontal_alignment="right", border=False):
-        if st.button("add block", key="key/button/add block"):
+        if st.button("add block", key="key/add block"):
             add_block()
             st.rerun()
 
