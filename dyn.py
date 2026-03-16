@@ -91,12 +91,23 @@ def get_block_label(id: int) -> str:
     return label
 
 
+def get_building_totals() -> dict[BuildingName, int]:
+    return {
+        name: sum(
+            (get_block_building(block, name) for block in get_block_ids()), start=0
+        )
+        for name in sorted(buildings)
+    }
+
+
 def key(*names: str | int) -> str:
     assert len(names) > 0
     return "key/" + "/".join(map(str, names))
 
 
-def st_block(bid: int, missing: dict[BuildingName, float]):
+def st_block(
+    bid: int, missing: dict[BuildingName, float], total_exports: dict[BuildingName, int]
+):
     bkey = partial(key, "block", bid)
     bbkey = partial(key, "block", bid, "buildings")
     bbcount = partial(get_block_building, bid)
@@ -118,8 +129,8 @@ def st_block(bid: int, missing: dict[BuildingName, float]):
 
         with st.container():
             if bi.imports:
-                st.write("**imports**")
                 with st.container(horizontal=True):
+                    st.write("**imports**:")
                     for name in sorted(bi.imports):
                         st.write(needs[name], name)
 
@@ -150,7 +161,7 @@ def st_block(bid: int, missing: dict[BuildingName, float]):
                 with st.container(horizontal=True):
                     for name in sorted(bi.exports):
                         with st.container(border=True, width=200):
-                            add = max(0, missing[name]) + needs[name] - bbcount(name)
+                            add = max(0, missing[name]) + (needs[name] - bbcount(name))
                             if math.ceil(add) > 0:
                                 label = f"{name} :warning: add {math.ceil(add)}"
                             elif math.ceil(-add) > 1:
@@ -161,16 +172,23 @@ def st_block(bid: int, missing: dict[BuildingName, float]):
                             add = needs[name] - bbcount(name)
                             if bbcount(name) > 0:
                                 usage = round(100 * needs[name] / bbcount(name))
-                                st.text(
-                                    "\n".join(
-                                        [
-                                            f"{100 - usage}% export = {bbcount(name) - needs[name]:.1f}/{bbcount(name)}",
-                                            f"{usage}% local = {needs[name]:.1f}/{bbcount(name)}",
-                                        ]
-                                    )
+                            else:
+                                usage = None
+                            if total_exports[name] > 0:
+                                eusage = round(
+                                    100 + 100 * missing[name] / total_exports[name]
                                 )
                             else:
-                                st.text("no export\nno import")
+                                eusage = None
+                            infos = [
+                                f"{needs[name]:.1f}/{bbcount(name)} local"
+                                + ("" if usage is None else f" ({usage}%)"),
+                                f"{bbcount(name) - needs[name]:.1f}/{bbcount(name)} export"
+                                + ("" if usage is None else f" ({100 - usage}%)"),
+                                f"{total_exports[name] + missing[name]:.1f}/{total_exports[name]} global"
+                                + ("" if eusage is None else f" ({eusage}%)"),
+                            ]
+                            st.text("\n".join(infos))
 
             misplaced = {
                 name
@@ -206,7 +224,7 @@ def main():
 
     st.title("blocks")
     for bid in get_block_ids():
-        st_block(bid, missing)
+        st_block(bid, missing, exports)
 
     with st.container(horizontal=False, horizontal_alignment="right", border=False):
         if st.button("add block", key="key/button/add block"):
@@ -216,12 +234,8 @@ def main():
     st.title("summary")
     with st.container():
         with st.container(horizontal=True):
-            for building in sorted(buildings):
-                count = sum(
-                    st.session_state.get(f"key/block/{block}/buildings/{building}", 0)
-                    for block in get_block_ids()
-                )
-                st.write(count, building)
+            for name, count in sorted(get_building_totals().items()):
+                st.write(count, name)
 
         with st.container(gap=None):
             for building in buildings:
