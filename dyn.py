@@ -80,11 +80,11 @@ def main():
     for block in state.blocks():
         with st.container(border=True):
             with st.container(horizontal=True, vertical_alignment="bottom"):
-                st.text_input(
-                    f"name for block id {block}", key=f"key/block/{block}/name"
-                )
                 block_type = st.selectbox(
                     "type", sorted(block_infos), key=f"key/block/{block}/type"
+                )
+                st.text_input(
+                    f"name for block id {block}", key=f"key/block/{block}/name"
                 )
                 if st.button("delete", key=f"key/block/{block}/delete"):
                     state.delete_block(block)
