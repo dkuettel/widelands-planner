@@ -231,16 +231,18 @@ def main():
             add_block()
             st.rerun()
 
-    st.title("summary")
-    with st.container():
-        with st.container(horizontal=True):
-            for name, count in sorted(get_building_totals().items()):
-                st.write(count, name)
-
+    with st.sidebar:
+        st.title("issues")
         with st.container(gap=None):
             for building in buildings:
                 if missing[building] > 0:
                     st.write("missing", round(missing[building], 1), building)
+
+        with st.container():
+            st.title("totals")
+            with st.container(gap=None):
+                for name, count in sorted(get_building_totals().items()):
+                    st.write(count, name)
 
 
 if __name__ == "__main__":
