@@ -74,9 +74,7 @@ def main():
 
     state = State()
 
-    st.title("widelands")
-
-    st.header("blocks")
+    st.title("blocks")
     for block in state.blocks():
         with st.container(border=True):
             with st.container(horizontal=True, vertical_alignment="bottom"):
@@ -149,7 +147,7 @@ def main():
             state.add_block()
             st.rerun()
 
-    st.header("summary")
+    st.title("summary")
     with st.container(horizontal=True):
         for building in sorted(buildings):
             count = sum(
