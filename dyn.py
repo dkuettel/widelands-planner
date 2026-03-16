@@ -99,66 +99,72 @@ def key(*names: str | int) -> str:
     return "key/" + "/".join(map(str, names))
 
 
+def st_block(bid: int):
+    bkey = partial(key, "block", bid)
+    bbkey = partial(key, "block", bid, "buildings")
+    bbcount = partial(get_block_building, bid)
+
+    with st.expander(
+        label=get_block_label(bid),
+        expanded=True,
+        key=bkey("expander"),
+    ):
+        with st.container(horizontal=True, vertical_alignment="bottom"):
+            st.selectbox("type", sorted(block_infos), key=bkey("type"))
+            st.text_input(f"name for block id {bid}", key=bkey("name"))
+            if st.button("delete", key=bkey("delete")):
+                delete_block(bid)
+                st.rerun()
+
+        with st.container(horizontal=True):
+            needs: dict[BuildingName, float] = get_direct_needs(bid)
+            for name in sorted(buildings):
+                if (
+                    name in get_block_info(bid).buildings
+                    or bbcount(name) > 0
+                    or needs.get(name, 0) > 0
+                ):
+                    with st.container(border=True, width=200):
+                        if name in get_block_info(bid).exports:
+                            st.number_input(
+                                f"{name} - exported",
+                                min_value=0,
+                                key=bbkey(name),
+                            )
+                        elif name in get_block_info(bid).imports:
+                            st.number_input(
+                                f"{name} - imported",
+                                min_value=0,
+                                key=bbkey(name),
+                                # TODO hmm this could be non-zero from a previous type? and then you cant change it
+                                disabled=True,
+                            )
+                        else:
+                            st.number_input(
+                                name,
+                                min_value=0,
+                                key=bbkey(name),
+                            )
+                        match needs.get(name, None):
+                            case None | 0 | 0.0:
+                                if (
+                                    name in get_block_info(bid).exports
+                                    or bbcount(name) == 0
+                                ):
+                                    st.write("no need")
+                                else:
+                                    st.write("no need :warning:")
+                            case float(c) | int(c):
+                                if bbcount(name) < c:
+                                    st.write(f"needs {c:.1f} :warning:")
+                                else:
+                                    st.write(f"needs {c:.1f}")
+
+
 def main():
     st.title("blocks")
     for bid in get_block_ids():
-        bkey = partial(key, "block", bid)
-        bbkey = partial(key, "block", bid, "buildings")
-        bbcount = partial(get_block_building, bid)
-        with st.expander(
-            label=get_block_label(bid),
-            expanded=True,
-            key=bkey("expander"),
-        ):
-            with st.container(horizontal=True, vertical_alignment="bottom"):
-                st.selectbox("type", sorted(block_infos), key=bkey("type"))
-                st.text_input(f"name for block id {bid}", key=bkey("name"))
-                if st.button("delete", key=bkey("delete")):
-                    delete_block(bid)
-                    st.rerun()
-            with st.container(horizontal=True):
-                needs: dict[BuildingName, float] = get_direct_needs(bid)
-                for name in sorted(buildings):
-                    if (
-                        name in get_block_info(bid).buildings
-                        or bbcount(name) > 0
-                        or needs.get(name, 0) > 0
-                    ):
-                        with st.container(border=True, width=200):
-                            if name in get_block_info(bid).exports:
-                                st.number_input(
-                                    f"{name} - exported",
-                                    min_value=0,
-                                    key=bbkey(name),
-                                )
-                            elif name in get_block_info(bid).imports:
-                                st.number_input(
-                                    f"{name} - imported",
-                                    min_value=0,
-                                    key=bbkey(name),
-                                    # TODO hmm this could be non-zero from a previous type? and then you cant change it
-                                    disabled=True,
-                                )
-                            else:
-                                st.number_input(
-                                    name,
-                                    min_value=0,
-                                    key=bbkey(name),
-                                )
-                            match needs.get(name, None):
-                                case None | 0 | 0.0:
-                                    if (
-                                        name in get_block_info(bid).exports
-                                        or bbcount(name) == 0
-                                    ):
-                                        st.write("no need")
-                                    else:
-                                        st.write("no need :warning:")
-                                case float(c) | int(c):
-                                    if bbcount(name) < c:
-                                        st.write(f"needs {c:.1f} :warning:")
-                                    else:
-                                        st.write(f"needs {c:.1f}")
+        st_block(bid)
 
     with st.container(horizontal=False, horizontal_alignment="right", border=False):
         if st.button("add block", key="key/button/add block"):
