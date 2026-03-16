@@ -28,16 +28,16 @@ requires: dict[BuildingName, dict[BuildingName, float]] = {
 
 @dataclass(frozen=True)
 class BlockInfo:
-    # NOTE how to deal with stuff that is exported but also used?
-    exports: set[BuildingName]
-    local: set[BuildingName]
     imports: set[BuildingName]
+    # NOTE how to deal with stuff that is exported but also used?
+    local: set[BuildingName]
+    exports: set[BuildingName]
 
 
 block_infos: dict[str, BlockInfo] = {
-    "clay works": BlockInfo({"brick kiln", "clay pit"}, {"water"}, {"granite", "coal"}),
-    "wood": BlockInfo({"woodcutter"}, {"forester"}, set()),
-    "mining": BlockInfo({"coal", "granite"}, set(), set()),
+    "clay works": BlockInfo({"granite", "coal"}, {"water"}, {"brick kiln", "clay pit"}),
+    "wood": BlockInfo(set(), {"forester"}, {"woodcutter"}),
+    "mining": BlockInfo(set(), set(), {"coal", "granite"}),
 }
 
 
@@ -96,7 +96,7 @@ def key(*names: str | int) -> str:
     return "key/" + "/".join(map(str, names))
 
 
-def st_block(bid: int):
+def st_block(bid: int, missing: dict[BuildingName, float]):
     bkey = partial(key, "block", bid)
     bbkey = partial(key, "block", bid, "buildings")
     bbcount = partial(get_block_building, bid)
@@ -117,32 +117,11 @@ def st_block(bid: int):
         needs: dict[BuildingName, float] = get_direct_needs(bid)
 
         with st.container():
-            if bi.exports:
-                st.write("**exports**")
+            if bi.imports:
+                st.write("**imports**")
                 with st.container(horizontal=True):
-                    for name in sorted(bi.exports):
-                        with st.container(border=True, width=200):
-                            add = needs[name] - bbcount(name)
-                            if math.ceil(add) > 0:
-                                label = f"{name} :warning: add {math.ceil(add)}"
-                            elif math.ceil(-add) > 1:
-                                label = f"{name} :warning: rm {math.ceil(-add) - 1}"
-                            else:
-                                label = name
-                            st.number_input(label, min_value=0, key=bbkey(name))
-                            add = needs[name] - bbcount(name)
-                            if bbcount(name) > 0:
-                                usage = round(100 * needs[name] / bbcount(name))
-                                st.text(
-                                    "\n".join(
-                                        [
-                                            f"{100 - usage}% export = {bbcount(name) - needs[name]:.1f}/{bbcount(name)}",
-                                            f"{usage}% local = {needs[name]:.1f}/{bbcount(name)}",
-                                        ]
-                                    )
-                                )
-                            else:
-                                st.text("no export\nno import")
+                    for name in sorted(bi.imports):
+                        st.write(needs[name], name)
 
             if bi.local:
                 st.write("**local**")
@@ -166,6 +145,33 @@ def st_block(bid: int):
                             else:
                                 st.text("no production")
 
+            if bi.exports:
+                st.write("**exports**")
+                with st.container(horizontal=True):
+                    for name in sorted(bi.exports):
+                        with st.container(border=True, width=200):
+                            add = max(0, missing[name]) + needs[name] - bbcount(name)
+                            if math.ceil(add) > 0:
+                                label = f"{name} :warning: add {math.ceil(add)}"
+                            elif math.ceil(-add) > 1:
+                                label = f"{name} :warning: rm {math.ceil(-add) - 1}"
+                            else:
+                                label = name
+                            st.number_input(label, min_value=0, key=bbkey(name))
+                            add = needs[name] - bbcount(name)
+                            if bbcount(name) > 0:
+                                usage = round(100 * needs[name] / bbcount(name))
+                                st.text(
+                                    "\n".join(
+                                        [
+                                            f"{100 - usage}% export = {bbcount(name) - needs[name]:.1f}/{bbcount(name)}",
+                                            f"{usage}% local = {needs[name]:.1f}/{bbcount(name)}",
+                                        ]
+                                    )
+                                )
+                            else:
+                                st.text("no export\nno import")
+
             misplaced = {
                 name
                 for name in buildings
@@ -181,17 +187,26 @@ def st_block(bid: int):
                         with st.container(border=True, width=200):
                             st.number_input(name, min_value=0, key=bbkey(name))
 
-            if bi.imports:
-                st.write("**imports**")
-                with st.container(horizontal=True):
-                    for name in sorted(bi.imports):
-                        st.write(needs[name], name)
-
 
 def main():
+    exports: dict[BuildingName, int] = {name: 0 for name in buildings}
+    for bid in get_block_ids():
+        for building in get_block_info(bid).exports:
+            exports[building] += get_block_building(bid, building)
+
+    imports: dict[BuildingName, float] = {name: 0.0 for name in buildings}
+    for bid in get_block_ids():
+        needs: dict[BuildingName, float] = get_direct_needs(bid)
+        for building in get_block_info(bid).imports:
+            imports[building] += needs[building]
+
+    missing: dict[BuildingName, float] = {
+        name: (imports[name] - exports[name]) for name in buildings
+    }
+
     st.title("blocks")
     for bid in get_block_ids():
-        st_block(bid)
+        st_block(bid, missing)
 
     with st.container(horizontal=False, horizontal_alignment="right", border=False):
         if st.button("add block", key="key/button/add block"):
@@ -199,34 +214,19 @@ def main():
             st.rerun()
 
     st.title("summary")
-    with st.container(horizontal=True):
-        for building in sorted(buildings):
-            count = sum(
-                st.session_state.get(f"key/block/{block}/buildings/{building}", 0)
-                for block in get_block_ids()
-            )
-            st.write(count, building)
+    with st.container():
+        with st.container(horizontal=True):
+            for building in sorted(buildings):
+                count = sum(
+                    st.session_state.get(f"key/block/{block}/buildings/{building}", 0)
+                    for block in get_block_ids()
+                )
+                st.write(count, building)
 
-    exports: dict[str, int] = dict()
-    for bid in get_block_ids():
-        block_type = st.session_state[f"key/block/{bid}/type"]
-        for building in block_infos[block_type].exports:
-            exports[building] = exports.get(building, 0) + st.session_state.get(
-                f"key/block/{bid}/buildings/{building}", 0
-            )
-
-    imports: dict[str, float] = dict()
-    for bid in get_block_ids():
-        block_type = st.session_state[f"key/block/{bid}/type"]
-        needs: dict[BuildingName, float] = get_direct_needs(bid)
-        for building in block_infos[block_type].imports:
-            imports[building] = imports.get(building, 0) + needs.get(building, 0)
-
-    with st.container(gap=None):
-        for building in buildings:
-            missing = imports.get(building, 0) - exports.get(building, 0)
-            if missing > 0:
-                st.write(f"missing {missing} {building}")
+        with st.container(gap=None):
+            for building in buildings:
+                if missing[building] > 0:
+                    st.write("missing", round(missing[building], 1), building)
 
 
 if __name__ == "__main__":
