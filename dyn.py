@@ -28,20 +28,16 @@ requires: dict[BuildingName, dict[BuildingName, float]] = {
 
 @dataclass(frozen=True)
 class BlockInfo:
-    buildings: set[BuildingName]
     # NOTE how to deal with stuff that is exported but also used?
     exports: set[BuildingName]
+    local: set[BuildingName]
     imports: set[BuildingName]
 
 
 block_infos: dict[str, BlockInfo] = {
-    "clay works": BlockInfo(
-        {"clay pit", "brick kiln", "water"},
-        {"brick kiln", "clay pit"},
-        {"granite", "coal"},
-    ),
-    "wood": BlockInfo({"forester", "woodcutter"}, {"woodcutter"}, set()),
-    "mining": BlockInfo({"coal", "granite"}, {"coal", "granite"}, set()),
+    "clay works": BlockInfo({"brick kiln", "clay pit"}, {"water"}, {"granite", "coal"}),
+    "wood": BlockInfo({"woodcutter"}, {"forester"}, set()),
+    "mining": BlockInfo({"coal", "granite"}, set(), set()),
 }
 
 
@@ -148,11 +144,11 @@ def st_block(bid: int):
                             else:
                                 st.text("no export\nno import")
 
-            if bi.buildings - bi.exports - bi.imports:
+            if bi.local:
                 st.write("**local**")
                 with st.container(horizontal=True):
                     # TODO rename bi.buildings to bi.local and dont overlap?
-                    for name in sorted(bi.buildings - bi.exports - bi.imports):
+                    for name in sorted(bi.local):
                         with st.container(border=True, width=200):
                             add = needs[name] - bbcount(name)
                             if math.ceil(add) > 0:
@@ -170,15 +166,14 @@ def st_block(bid: int):
                             else:
                                 st.text("no production")
 
-            misplaced = (
-                {
-                    name
-                    for name in buildings
-                    if bbcount(name) > 0 or (needs[name] > 0 and name not in bi.imports)
-                }
-                - bi.buildings
-                - bi.exports
-            )
+            misplaced = {
+                name
+                for name in buildings
+                if (bbcount(name) > 0 and name not in (bi.exports | bi.local))
+                or (
+                    needs[name] > 0 and name not in (bi.exports | bi.local | bi.imports)
+                )
+            }
             if misplaced:
                 st.write("**misplaced** :warning:")
                 with st.container(horizontal=True):
