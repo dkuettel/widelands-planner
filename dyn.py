@@ -143,8 +143,8 @@ def main():
                                     else:
                                         st.write(f"needs {c:.1f}")
 
-    with st.container(horizontal=False, border=False):
-        if st.button("add block"):
+    with st.container(horizontal=False, horizontal_alignment="right", border=False):
+        if st.button("add block", key="key/button/add block"):
             state.add_block()
             st.rerun()
 
