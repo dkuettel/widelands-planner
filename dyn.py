@@ -43,28 +43,30 @@ block_infos: dict[str, BlockInfo] = {
 }
 
 
-class State:
-    def blocks(self) -> list[int]:
-        return st.session_state.setdefault("state/blocks", [])
+def get_block_ids() -> list[int]:
+    return st.session_state.setdefault("state/blocks", [])
 
-    def add_block(self):
-        blocks = self.blocks()
-        blocks.append(max(blocks, default=0) + 1)
 
-    def delete_block(self, id: int):
-        blocks = self.blocks()
-        blocks.remove(id)
+def add_block():
+    blocks = get_block_ids()
+    blocks.append(max(blocks, default=0) + 1)
 
-    def block_type(self, id: int) -> str:
-        return st.session_state.setdefault(
-            f"key/block/{id}/type", sorted(block_infos)[0]
-        )
 
-    def block_name(self, id: int) -> str:
-        return st.session_state.setdefault(f"key/block/{id}/name", "")
+def delete_block(id: int):
+    blocks = get_block_ids()
+    blocks.remove(id)
 
-    def block_info(self, id: int) -> BlockInfo:
-        return block_infos[self.block_type(id)]
+
+def get_block_type(id: int) -> str:
+    return st.session_state.setdefault(f"key/block/{id}/type", sorted(block_infos)[0])
+
+
+def get_block_name(id: int) -> str:
+    return st.session_state.setdefault(f"key/block/{id}/name", "")
+
+
+def get_block_info(id: int) -> BlockInfo:
+    return block_infos[get_block_type(id)]
 
 
 def get_direct_needs(block: int) -> dict[BuildingName, float]:
@@ -80,12 +82,10 @@ def get_direct_needs(block: int) -> dict[BuildingName, float]:
 
 
 def main():
-    state = State()
-
     st.title("blocks")
-    for block in state.blocks():
-        label = state.block_type(block)
-        name = state.block_name(block)
+    for block in get_block_ids():
+        label = get_block_type(block)
+        name = get_block_name(block)
         if name:
             label = f'{label} **"{name}"**'
         with st.expander(label, expanded=True, key=f"key/block/{block}/expander"):
@@ -95,13 +95,13 @@ def main():
                     f"name for block id {block}", key=f"key/block/{block}/name"
                 )
                 if st.button("delete", key=f"key/block/{block}/delete"):
-                    state.delete_block(block)
+                    delete_block(block)
                     st.rerun()
             with st.container(horizontal=True):
                 needs: dict[BuildingName, float] = get_direct_needs(block)
                 for name in sorted(buildings):
                     if (
-                        name in state.block_info(block).buildings
+                        name in get_block_info(block).buildings
                         or st.session_state.get(
                             f"key/block/{block}/buildings/{name}", 0
                         )
@@ -109,13 +109,13 @@ def main():
                         or needs.get(name, 0) > 0
                     ):
                         with st.container(border=True, width=200):
-                            if name in state.block_info(block).exports:
+                            if name in get_block_info(block).exports:
                                 st.number_input(
                                     f"{name} - exported",
                                     min_value=0,
                                     key=f"key/block/{block}/buildings/{name}",
                                 )
-                            elif name in state.block_info(block).imports:
+                            elif name in get_block_info(block).imports:
                                 st.number_input(
                                     f"{name} - imported",
                                     min_value=0,
@@ -132,7 +132,7 @@ def main():
                             match needs.get(name, None):
                                 case None | 0 | 0.0:
                                     if (
-                                        name in state.block_info(block).exports
+                                        name in get_block_info(block).exports
                                         or st.session_state.get(
                                             f"key/block/{block}/buildings/{name}", 0
                                         )
@@ -154,7 +154,7 @@ def main():
 
     with st.container(horizontal=False, horizontal_alignment="right", border=False):
         if st.button("add block", key="key/button/add block"):
-            state.add_block()
+            add_block()
             st.rerun()
 
     st.title("summary")
@@ -162,12 +162,12 @@ def main():
         for building in sorted(buildings):
             count = sum(
                 st.session_state.get(f"key/block/{block}/buildings/{building}", 0)
-                for block in state.blocks()
+                for block in get_block_ids()
             )
             st.write(count, building)
 
     exports: dict[str, int] = dict()
-    for block in state.blocks():
+    for block in get_block_ids():
         block_type = st.session_state[f"key/block/{block}/type"]
         for building in block_infos[block_type].exports:
             exports[building] = exports.get(building, 0) + st.session_state.get(
@@ -175,7 +175,7 @@ def main():
             )
 
     imports: dict[str, float] = dict()
-    for block in state.blocks():
+    for block in get_block_ids():
         block_type = st.session_state[f"key/block/{block}/type"]
         needs: dict[BuildingName, float] = get_direct_needs(block)
         for building in block_infos[block_type].imports:
