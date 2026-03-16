@@ -51,9 +51,20 @@ class State:
         blocks = self.blocks()
         blocks.append(max(blocks, default=0) + 1)
 
-    def delete_block(self, i: int):
+    def delete_block(self, id: int):
         blocks = self.blocks()
-        blocks.remove(i)
+        blocks.remove(id)
+
+    def block_type(self, id: int) -> str:
+        return st.session_state.setdefault(
+            f"key/block/{id}/type", sorted(block_infos)[0]
+        )
+
+    def block_name(self, id: int) -> str:
+        return st.session_state.setdefault(f"key/block/{id}/name", "")
+
+    def block_info(self, id: int) -> BlockInfo:
+        return block_infos[self.block_type(id)]
 
 
 def get_direct_needs(block: int) -> dict[BuildingName, float]:
@@ -73,15 +84,13 @@ def main():
 
     st.title("blocks")
     for block in state.blocks():
-        label = st.session_state.get(f"key/block/{block}/type", "")
-        name = st.session_state.get(f"key/block/{block}/name", "")
+        label = state.block_type(block)
+        name = state.block_name(block)
         if name:
             label = f'{label} **"{name}"**'
         with st.expander(label, expanded=True, key=f"key/block/{block}/expander"):
             with st.container(horizontal=True, vertical_alignment="bottom"):
-                block_type = st.selectbox(
-                    "type", sorted(block_infos), key=f"key/block/{block}/type"
-                )
+                st.selectbox("type", sorted(block_infos), key=f"key/block/{block}/type")
                 st.text_input(
                     f"name for block id {block}", key=f"key/block/{block}/name"
                 )
@@ -92,7 +101,7 @@ def main():
                 needs: dict[BuildingName, float] = get_direct_needs(block)
                 for name in sorted(buildings):
                     if (
-                        name in block_infos[block_type].buildings
+                        name in state.block_info(block).buildings
                         or st.session_state.get(
                             f"key/block/{block}/buildings/{name}", 0
                         )
@@ -100,13 +109,13 @@ def main():
                         or needs.get(name, 0) > 0
                     ):
                         with st.container(border=True, width=200):
-                            if name in block_infos[block_type].exports:
+                            if name in state.block_info(block).exports:
                                 st.number_input(
                                     f"{name} - exported",
                                     min_value=0,
                                     key=f"key/block/{block}/buildings/{name}",
                                 )
-                            elif name in block_infos[block_type].imports:
+                            elif name in state.block_info(block).imports:
                                 st.number_input(
                                     f"{name} - imported",
                                     min_value=0,
@@ -123,7 +132,7 @@ def main():
                             match needs.get(name, None):
                                 case None | 0 | 0.0:
                                     if (
-                                        name in block_infos[block_type].exports
+                                        name in state.block_info(block).exports
                                         or st.session_state.get(
                                             f"key/block/{block}/buildings/{name}", 0
                                         )
