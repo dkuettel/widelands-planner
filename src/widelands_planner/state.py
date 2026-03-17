@@ -3,6 +3,7 @@ from __future__ import annotations
 import math
 from dataclasses import dataclass
 from enum import Enum
+from functools import partial
 
 
 class Item(Enum):
@@ -14,6 +15,7 @@ class Item(Enum):
     log = "log"
     fish = "fish"
     meat = "meat"
+    tree = "tree"  # what the forester plants, not logs yet
 
 
 @dataclass(frozen=True)
@@ -140,8 +142,15 @@ class SmokeryCount:
 
 
 @dataclass(frozen=True)
-class FishersHouseCount:
+class PlainCount:
+    rate: float
+    item: Item
     count: int
+
+    @classmethod
+    def fn(cls, short: float, long: float, item: Item):
+        # TODO do we want to adjust this? arent we often in the more optimal case?
+        return partial(cls, (short + long) / 2, item)
 
     def __post_init__(self):
         assert 0 <= self.count
@@ -150,27 +159,23 @@ class FishersHouseCount:
         return Ivec.from_zeros()
 
     def makes_ips(self) -> Ivec:
-        # TODO do we want to adjust this? arent we often in the more optimal case?
-        t = (26 + 59) / 2
-        r = 1 / t
-        return Ivec({Item.fish: r * self.count})
+        return Ivec({self.item: self.rate * self.count})
 
     def can_fulfill(self, shortages: Ivec) -> None | str:
-        s = shortages[Item.fish]
+        s = shortages[self.item]
         if s == 0:
             return None
-        t = (26 + 59) / 2
-        r = 1 / t
-        return f"add {s / r:.1f} for fish"
+        return f"add {s / self.rate:.1f} for {self.item.value}"
 
 
 class Building(Enum):
     taverns = "taverns", TavernCount
     smokeries = "smokeries", SmokeryCount
-    fishers_houses = "fisher's houses", FishersHouseCount
+    fishers_houses = "fisher's houses", PlainCount.fn(26, 59, Item.fish)
+    foresters_houses = "forester's houses", PlainCount.fn(24, 46, Item.tree)
 
 
-type BuildingCount = TavernCount | SmokeryCount | FishersHouseCount
+type BuildingCount = TavernCount | SmokeryCount | PlainCount
 
 
 def get_takes_ips(buildings: list[BuildingCount]) -> Ivec:

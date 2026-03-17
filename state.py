@@ -23,7 +23,7 @@ def st_building_count(
                     value=0.5,
                     max_value=1.0,
                     step=0.01,
-                    key="taverns/fruit_vs_bread",
+                    key=f"{name}/fruit_vs_bread",
                 )
                 fish_vs_meat = 1 - st.slider(
                     label="<- fish vs meat ->",
@@ -31,7 +31,7 @@ def st_building_count(
                     value=0.5,
                     max_value=1.0,
                     step=0.01,
-                    key="taverns/fish_vs_meat",
+                    key=f"{name}/fish_vs_meat",
                 )
                 return cls(count, fruit_vs_bread, fish_vs_meat), info
         case state.Building.smokeries:
@@ -45,10 +45,10 @@ def st_building_count(
                     value=0.5,
                     max_value=1.0,
                     step=0.01,
-                    key="smokeries/fish_vs_meat",
+                    key=f"{name}/fish_vs_meat",
                 )
                 return cls(count, fish_vs_meat), info
-        case state.Building.fishers_houses:
+        case state.Building.fishers_houses | state.Building.foresters_houses:
             name, cls = building.value
             with st.container(border=True):
                 count = st.number_input(name, min_value=0, value=0, key=f"{name}/count")
