@@ -98,6 +98,9 @@ class TavernCount:
         r = 1 / (2 * 37)  # two rations from two inputs (one of each)
         return Ivec({Item.bread: 2 * r * self.count})
 
+    def can_fulfill(self, shortages: Ivec) -> None | str:
+        return None
+
 
 @dataclass(frozen=True)
 class SmokeryCount:
@@ -127,6 +130,14 @@ class SmokeryCount:
             }
         )
 
+    def can_fulfill(self, shortages: Ivec) -> None | str:
+        s = shortages[Item.smoked_fish] + shortages[Item.smoked_meat]
+        if s == 0:
+            return None
+        r = 1 / 27  # one smoked thing from one raw thing and half a log
+        # TODO use self.fish_vs_meat ?
+        return f"add {s / r:.1f} for smoked fish and/or smoked_meat"
+
 
 @dataclass(frozen=True)
 class FishersHouseCount:
@@ -143,6 +154,20 @@ class FishersHouseCount:
         t = (26 + 59) / 2
         r = 1 / t
         return Ivec({Item.fish: r * self.count})
+
+    def can_fulfill(self, shortages: Ivec) -> None | str:
+        s = shortages[Item.fish]
+        if s == 0:
+            return None
+        t = (26 + 59) / 2
+        r = 1 / t
+        return f"add {s / r:.1f} for fish"
+
+
+class Building(Enum):
+    taverns = "taverns", TavernCount
+    smokeries = "smokeries", SmokeryCount
+    fishers_houses = "fisher's houses", FishersHouseCount
 
 
 type BuildingCount = TavernCount | SmokeryCount | FishersHouseCount
