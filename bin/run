@@ -1,4 +1,7 @@
 #!/usr/bin/env zsh
 set -eu -o pipefail
 
-uv run main $@
+# TODO --server.folderWatchList TEXT
+# but it should already watch every file from the pwd and its subdirectories
+# (recursively?)
+uv run streamlit run --server.runOnSave True state.py
