@@ -2,45 +2,118 @@ from __future__ import annotations
 
 import json
 import math
-import pickle
+from collections.abc import Iterator
 from dataclasses import dataclass
 from functools import partial
+from itertools import product
 from pathlib import Path
 from typing import Literal
 
 import streamlit as st
 
 type BuildingName = Literal[
-    "forester",
-    "woodcutter",
-    "clay pit",
+    "bakery",
     "brick kiln",
-    "water",
+    "clay pit",
     "coal",
+    "fishery",
+    "forester",
+    "fruit",
     "granite",
+    "reed",
+    "smokery",
+    "tavern",
+    "water",
+    "woodcutter",
+    "farm",
 ]
 
 buildings: set[BuildingName] = set(BuildingName.__value__.__args__)
 
-requires: dict[BuildingName, dict[BuildingName, float]] = {
+
+def rratio(make: float, take: float) -> float:
+    return make / take
+
+
+requires: dict[
+    BuildingName,
+    dict[BuildingName, float]
+    | tuple[dict[BuildingName, float], dict[BuildingName, float]],
+] = {
     "woodcutter": {"forester": 0.5},
     "clay pit": {"water": 0.7},
     "brick kiln": {"clay pit": 2.1, "coal": 0.5, "granite": 0.5},
+    "coal": {"tavern": rratio(37, 2 * 41)},
+    "granite": {"tavern": rratio(37, 2 * 46)},
+    "tavern": (
+        {
+            "smokery": rratio(27, 2 * 37),  # TODO meaning only fish right now
+            "fruit": rratio((37 + 62) / 2, 2 * 37),
+        },
+        {
+            "smokery": rratio(27, 2 * 37),  # TODO meaning only fish right now
+            "bakery": rratio(44, 2 * 37),
+        },
+    ),
+    "smokery": {
+        "fishery": rratio((26 + 59) / 2, 27),
+        "woodcutter": rratio((49 + 89) / 2, 2 * 27),
+    },
 }
 
 
+# TODO might be nicer to make this numpy or torch with fixed order?
+@dataclass(frozen=True)
+class Bvecf:
+    data: dict[BuildingName, float]
+
+    @classmethod
+    def from_zero(cls):
+        return cls({name: 0.0 for name in buildings})
+
+    def __getitem__(self, name: BuildingName) -> float:
+        return self.data[name]
+
+    def items(self):
+        return self.data.items()
+
+    def inc(self, other: dict[BuildingName, float]) -> Bvecf:
+        return Bvecf({k: (v + other.get(k, 0.0)) for k, v in self.data.items()})
+
+    def add(self, other: Bvecf) -> Bvecf:
+        return Bvecf({k: (v + other[k]) for k, v in self.data.items()})
+
+
+# TODO rename to block type? better to have name in here or in dict?
 @dataclass(frozen=True)
 class BlockInfo:
     imports: set[BuildingName]
-    # NOTE how to deal with stuff that is exported but also used?
     local: set[BuildingName]
     exports: set[BuildingName]
 
 
 block_infos: dict[str, BlockInfo] = {
-    "clay works": BlockInfo({"granite", "coal"}, {"water"}, {"brick kiln", "clay pit"}),
+    "materials": BlockInfo(
+        {"granite", "coal"},
+        {"water", "forester"},
+        {"brick kiln", "clay pit", "reed", "woodcutter"},
+    ),
     "wood": BlockInfo(set(), {"forester"}, {"woodcutter"}),
     "mining": BlockInfo(set(), set(), {"coal", "granite"}),
+    "rations": BlockInfo(
+        set(),
+        {
+            "forester",
+            "woodcutter",
+            "farm",
+            "water",
+            "bakery",
+            "smokery",
+            "fishery",
+            "fruit",
+        },
+        {"tavern"},
+    ),
 }
 
 
@@ -75,15 +148,79 @@ def get_block_building(id: int, name: BuildingName) -> int:
 
 
 def get_direct_needs(block: int) -> dict[BuildingName, float]:
-    needs: dict[BuildingName, float] = {name: 0.0 for name in buildings}
-    for building in buildings:
-        for other, count in requires.get(building, {}).items():
-            needs[other] = (
-                needs.get(other, 0)
-                + st.session_state.get(f"state/block/{block}/buildings/{building}", 0)
-                * count
+    names: set[BuildingName]
+    names = {name for name in buildings if get_block_building(block, name) > 0}
+    names = {name for name in names if name in requires}
+    weights: dict[BuildingName, int]
+    weights = {name: (1 if isinstance(requires[name], dict) else 2) for name in names}
+
+    def get_combs(
+        weights: list[tuple[BuildingName, int]],
+    ) -> Iterator[dict[BuildingName, list[float]]]:
+        if len(weights) == 0:
+            yield dict()
+            return
+        (name, w), *more = weights
+        match w:
+            case 1:
+                for c in get_combs(more):
+                    c[name] = [1.0]
+                    yield c
+            case 2:
+                for i in range(0, 10 + 1):
+                    for c in get_combs(more):
+                        c[name] = [i / 10, 1 - i / 10]
+                        yield c
+            case _:
+                assert False, w
+
+    combs = list(get_combs(list(weights.items())))
+
+    def get_needs(comb: dict[BuildingName, list[float]]) -> dict[BuildingName, float]:
+        needs = {name: 0.0 for name in buildings}
+        for name, weights in comb.items():
+            match weights:
+                case [_]:
+                    for other, ratio in requires[name].items():  # pyright: ignore[reportUnknownVariableType, reportAttributeAccessIssue]
+                        needs[other] += get_block_building(block, name) * ratio
+                case [a, b]:
+                    for other, ratio in requires[name][0].items():  # pyright: ignore[reportUnknownVariableType, reportAttributeAccessIssue]
+                        needs[other] += a * get_block_building(block, name) * ratio
+                    for other, ratio in requires[name][1].items():  # pyright: ignore[reportUnknownVariableType, reportAttributeAccessIssue]
+                        needs[other] += b * get_block_building(block, name) * ratio
+                case _:
+                    assert False
+        return needs
+
+    combs = [(comb, get_needs(comb)) for comb in combs]
+
+    def is_fulfilled(needs: dict[BuildingName, float]) -> bool:
+        return all(
+            get_block_building(block, name) >= need for (name, need) in needs.items()
+        )
+
+    fulfilled = [(comb, needs) for (comb, needs) in combs if is_fulfilled(needs)]
+
+    if len(fulfilled) > 0:
+
+        def get_fulfilled_loss(x) -> float:
+            comb, _ = x
+            return sum(
+                (w - 1 / len(weights)) ** 2
+                for weights in comb.values()
+                for w in weights
             )
-    return needs
+
+        return min(fulfilled, key=get_fulfilled_loss)[1]
+
+    def get_unfulfilled_loss(x) -> float:
+        _, needs = x
+        return sum(
+            (get_block_building(block, name) - count) ** 2
+            for name, count in needs.items()
+        )
+
+    return min(combs, key=get_unfulfilled_loss)[1]
 
 
 def get_block_label(id: int) -> str:
