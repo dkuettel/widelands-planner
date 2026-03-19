@@ -3,7 +3,7 @@ from __future__ import annotations
 import math
 from dataclasses import dataclass
 from enum import Enum
-from functools import partial
+from typing import Literal
 
 
 class Item(Enum):
@@ -74,92 +74,25 @@ class Ivec:
 
 
 @dataclass(frozen=True)
-class TavernCount:
-    count: int
-    # TODO only models two-input ration production, not the slower one-input possibility
-    fruit_vs_bread: float
-    fish_vs_meat: float
-
-    def __post_init__(self):
-        assert 0 <= self.count
-        assert 0 <= self.fruit_vs_bread <= 1
-        assert 0 <= self.fish_vs_meat <= 1
-
-    def takes_ips(self) -> Ivec:
-        r = 1 / (2 * 37)  # two rations from two inputs (one of each)
-        return Ivec(
-            {
-                Item.fruit: r * self.count * self.fruit_vs_bread,
-                Item.bread: r * self.count * (1 - self.fruit_vs_bread),
-                Item.smoked_fish: r * self.count * self.fish_vs_meat,
-                Item.smoked_meat: r * self.count * (1 - self.fish_vs_meat),
-            }
-        )
-
-    def makes_ips(self) -> Ivec:
-        r = 1 / (2 * 37)  # two rations from two inputs (one of each)
-        return Ivec({Item.bread: 2 * r * self.count})
-
-    def can_fulfill(self, shortages: Ivec) -> None | str:
-        return None
-
-
-@dataclass(frozen=True)
-class SmokeryCount:
-    count: int
-    fish_vs_meat: float
-
-    def __post_init__(self):
-        assert 0 <= self.count
-        assert 0 <= self.fish_vs_meat <= 1
-
-    def takes_ips(self) -> Ivec:
-        r = 1 / 27  # one smoked thing from one raw thing and half a log
-        return Ivec(
-            {
-                Item.log: 0.5 * r * self.count,
-                Item.fish: r * self.count * self.fish_vs_meat,
-                Item.meat: r * self.count * (1 - self.fish_vs_meat),
-            }
-        )
-
-    def makes_ips(self) -> Ivec:
-        r = 1 / 27  # one smoked thing from one raw thing and half a log
-        return Ivec(
-            {
-                Item.smoked_fish: r * self.count * self.fish_vs_meat,
-                Item.smoked_meat: r * self.count * (1 - self.fish_vs_meat),
-            }
-        )
-
-    def can_fulfill(self, shortages: Ivec) -> None | str:
-        s = shortages[Item.smoked_fish] + shortages[Item.smoked_meat]
-        if s == 0:
-            return None
-        r = 1 / 27  # one smoked thing from one raw thing and half a log
-        # TODO use self.fish_vs_meat ?
-        return f"add {s / r:.1f} for smoked fish and/or smoked_meat"
-
-
-@dataclass(frozen=True)
-class PlainCount:
+class PlainBuilding:
+    name: str
     rate: float
     item: Item
-    count: int
 
     @classmethod
-    def fn(cls, short: float, long: float, item: Item):
+    def from_seconds(cls, name: str, short: float, long: float, count: int, item: Item):
         # TODO do we want to adjust this? arent we often in the more optimal case?
-        return partial(cls, (short + long) / 2, item)
+        return cls(name, count / ((short + long) / 2), item)
 
     def __post_init__(self):
-        assert 0 <= self.count
+        assert self.name
+        assert self.rate >= 0
 
     def takes_ips(self) -> Ivec:
         return Ivec.from_zeros()
 
     def makes_ips(self) -> Ivec:
-        return Ivec({self.item: self.rate * self.count})
+        return Ivec({self.item: self.rate})
 
     def can_fulfill(self, shortages: Ivec) -> None | str:
         s = shortages[self.item]
@@ -168,14 +101,142 @@ class PlainCount:
         return f"add {s / self.rate:.1f} for {self.item.value}"
 
 
-class Building(Enum):
-    taverns = "taverns", TavernCount
-    smokeries = "smokeries", SmokeryCount
-    fishers_houses = "fisher's houses", PlainCount.fn(26, 59, Item.fish)
-    foresters_houses = "forester's houses", PlainCount.fn(24, 46, Item.tree)
+# TODO only models two-input ration production, not the slower one-input possibility
+@dataclass(frozen=True)
+class TavernBuilding:
+    name: Literal["taverns"] = "taverns"
+
+    def __post_init__(self):
+        assert self.name
+
+    def takes_ips(self, fruit_vs_bread: float, fish_vs_meat: float) -> Ivec:
+        r = 1 / (2 * 37)  # two rations from two inputs (one of each)
+        return Ivec(
+            {
+                Item.fruit: r * fruit_vs_bread,
+                Item.bread: r * (1 - fruit_vs_bread),
+                Item.smoked_fish: r * fish_vs_meat,
+                Item.smoked_meat: r * (1 - fish_vs_meat),
+            }
+        )
+
+    def makes_ips(self) -> Ivec:
+        r = 1 / (2 * 37)  # two rations from two inputs (one of each)
+        return Ivec({Item.bread: 2 * r})
+
+    def can_fulfill(self, shortages: Ivec) -> None | str:
+        # TODO todo
+        return None
 
 
-type BuildingCount = TavernCount | SmokeryCount | PlainCount
+@dataclass(frozen=True)
+class ConfiguredTavernBuilding:
+    building: TavernBuilding
+    fruit_vs_bread: float
+    fish_vs_meat: float
+    name: Literal["taverns"] = "taverns"
+
+    def __post_init__(self):
+        assert self.name
+        assert 0 <= self.fruit_vs_bread <= 1
+        assert 0 <= self.fish_vs_meat <= 1
+
+    def takes_ips(self) -> Ivec:
+        return self.building.takes_ips(self.fruit_vs_bread, self.fish_vs_meat)
+
+    def makes_ips(self) -> Ivec:
+        return self.building.makes_ips()
+
+    def can_fulfill(self, shortages: Ivec) -> None | str:
+        return self.building.can_fulfill(shortages)
+
+
+@dataclass(frozen=True)
+class SmokeryBuilding:
+    name: Literal["smokeries"] = "smokeries"
+
+    def __post_init__(self):
+        assert self.name
+
+    def takes_ips(self, fish_vs_meat: float) -> Ivec:
+        r = 1 / 27  # one smoked thing from one raw thing and half a log
+        return Ivec(
+            {
+                Item.log: 0.5 * r,
+                Item.fish: r * fish_vs_meat,
+                Item.meat: r * (1 - fish_vs_meat),
+            }
+        )
+
+    def makes_ips(self, fish_vs_meat: float) -> Ivec:
+        r = 1 / 27  # one smoked thing from one raw thing and half a log
+        return Ivec(
+            {
+                Item.smoked_fish: r * fish_vs_meat,
+                Item.smoked_meat: r * (1 - fish_vs_meat),
+            }
+        )
+
+    def can_fulfill(self, shortages: Ivec) -> None | str:
+        s = shortages[Item.smoked_fish] + shortages[Item.smoked_meat]
+        if s == 0:
+            return None
+        r = 1 / 27  # one smoked thing from one raw thing and half a log
+        # TODO use fish_vs_meat ?
+        return f"add {s / r:.1f} for smoked fish and/or smoked_meat"
+
+
+@dataclass(frozen=True)
+class ConfiguredSmokeryBuilding:
+    building: SmokeryBuilding
+    fish_vs_meat: float
+    name: Literal["smokeries"] = "smokeries"
+
+    def __post_init__(self):
+        assert 0 <= self.fish_vs_meat <= 1
+        assert self.name
+
+    def takes_ips(self) -> Ivec:
+        return self.building.takes_ips(self.fish_vs_meat)
+
+    def makes_ips(self) -> Ivec:
+        return self.building.makes_ips(self.fish_vs_meat)
+
+    def can_fulfill(self, shortages: Ivec) -> None | str:
+        return self.building.can_fulfill(shortages)
+
+
+type Building = PlainBuilding | TavernBuilding | SmokeryBuilding
+type ConfiguredBuilding = (
+    PlainBuilding | ConfiguredTavernBuilding | ConfiguredSmokeryBuilding
+)
+
+
+@dataclass(frozen=True)
+class BuildingCount:
+    count: int
+    building: ConfiguredBuilding
+
+    def __post_init__(self):
+        assert self.count >= 0
+
+    def takes_ips(self) -> Ivec:
+        return self.building.takes_ips().smul(self.count)
+
+    def makes_ips(self) -> Ivec:
+        return self.building.makes_ips().smul(self.count)
+
+    def can_fulfill(self, shortages: Ivec) -> None | str:
+        return self.building.can_fulfill(shortages)
+
+
+def get_buildings() -> list[Building]:
+    return [
+        TavernBuilding(),
+        SmokeryBuilding(),
+        PlainBuilding.from_seconds("fisher's houses", 26, 59, 1, Item.fish),
+        PlainBuilding.from_seconds("forester's houses", 24, 46, 1, Item.tree),
+    ]
 
 
 def get_takes_ips(buildings: list[BuildingCount]) -> Ivec:

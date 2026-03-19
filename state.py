@@ -12,8 +12,8 @@ def st_building_count(
     building: state.Building,
 ) -> tuple[state.BuildingCount, DeltaGenerator]:
     match building:
-        case state.Building.taverns:
-            name, cls = building.value
+        case state.TavernBuilding():
+            name = building.name
             with st.container(border=True):
                 count = st.number_input(name, min_value=0, value=0, key=f"{name}/count")
                 info = st.empty()
@@ -33,9 +33,15 @@ def st_building_count(
                     step=0.01,
                     key=f"{name}/fish_vs_meat",
                 )
-                return cls(count, fruit_vs_bread, fish_vs_meat), info
-        case state.Building.smokeries:
-            name, cls = building.value
+                return state.BuildingCount(
+                    count,
+                    state.ConfiguredTavernBuilding(
+                        building, fruit_vs_bread, fish_vs_meat
+                    ),
+                ), info
+
+        case state.SmokeryBuilding():
+            name = building.name
             with st.container(border=True):
                 count = st.number_input(name, min_value=0, value=0, key=f"{name}/count")
                 info = st.empty()
@@ -47,13 +53,16 @@ def st_building_count(
                     step=0.01,
                     key=f"{name}/fish_vs_meat",
                 )
-                return cls(count, fish_vs_meat), info
-        case state.Building.fishers_houses | state.Building.foresters_houses:
-            name, cls = building.value
+                return state.BuildingCount(
+                    count, state.ConfiguredSmokeryBuilding(building, fish_vs_meat)
+                ), info
+
+        case state.PlainBuilding():
+            name = building.name
             with st.container(border=True):
                 count = st.number_input(name, min_value=0, value=0, key=f"{name}/count")
                 info = st.empty()
-                return cls(count), info
+                return state.BuildingCount(count, building), info
 
 
 def main():
@@ -72,7 +81,7 @@ def main():
 
     buildings: list[state.BuildingCount] = []
     infos: list[DeltaGenerator] = []
-    for building in state.Building:
+    for building in state.get_buildings():
         b, i = st_building_count(building)
         buildings.append(b)
         infos.append(i)
