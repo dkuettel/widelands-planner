@@ -7,19 +7,26 @@ from typing import Literal
 
 
 class Item(Enum):
-    fruit = "fruit"
     bread = "bread"
-    smoked_meat = "smoked meat"
-    smoked_fish = "smoked fish"
-    ration = "ration"
-    log = "log"
     fish = "fish"
+    fruit = "fruit"
+    log = "log"
     meat = "meat"
+    ration = "ration"
+    smoked_fish = "smoked fish"
+    smoked_meat = "smoked meat"
     tree = "tree"  # what the forester plants, not logs yet
+    water = "water"
+    barley = "barley"
+    coal = "coal"
+    granite = "granite"
+    clay = "clay"
+    brick = "brick"
 
 
 @dataclass(frozen=True)
 class Ivec:
+    # TODO can we protect this dict from changes to be safe?
     data: dict[Item, float]
 
     @classmethod
@@ -76,29 +83,37 @@ class Ivec:
 @dataclass(frozen=True)
 class PlainBuilding:
     name: str
-    rate: float
-    item: Item
+    takes: Ivec
+    rate: float  # "takes" into "makes" per second
+    makes: Ivec
 
     @classmethod
     def from_seconds(cls, name: str, short: float, long: float, count: int, item: Item):
         # TODO do we want to adjust this? arent we often in the more optimal case?
-        return cls(name, count / ((short + long) / 2), item)
+        return cls(
+            name, Ivec.from_zeros(), 1 / ((short + long) / 2), Ivec({item: count})
+        )
 
     def __post_init__(self):
         assert self.name
         assert self.rate >= 0
 
     def takes_ips(self) -> Ivec:
-        return Ivec.from_zeros()
+        return self.takes.smul(self.rate)
 
     def makes_ips(self) -> Ivec:
-        return Ivec({self.item: self.rate})
+        return self.makes.smul(self.rate)
 
     def can_fulfill(self, shortages: Ivec) -> None | str:
-        s = shortages[self.item]
-        if s == 0:
+        items = {i for i, v in self.makes.data.items() if v > 0}
+        s = {i: shortages[i] for i in items if shortages[i] > 0}
+        if not s:
             return None
-        return f"add {s / self.rate:.1f} for {self.item.value}"
+        m = self.makes_ips()
+        adds = {i: (ips / m[i]) for i, ips in s.items()}
+        add = max(adds.values())
+        who = ", ".join(i.value for i in adds.keys())
+        return f"add {add:.1f} for {who}"
 
 
 # TODO only models two-input ration production, not the slower one-input possibility
@@ -123,8 +138,7 @@ class TavernBuilding:
         )
 
     def makes_ips(self) -> Ivec:
-        r = 1 / (2 * 37)  # two rations from two inputs (one of each)
-        return Ivec({Item.bread: 2 * r})
+        return Ivec({self.item: self.rate})
 
     def can_fulfill(self, shortages: Ivec) -> None | str:
         s = shortages[self.item]
@@ -239,12 +253,47 @@ class BuildingCount:
         return self.building.can_fulfill(shortages)
 
 
+def rate_from_seconds(seconds: float | tuple[float, float]) -> float:
+    match seconds:
+        case [a, b]:
+            return 1 / ((a + b) / 2)
+        case t:
+            return 1 / t
+
+
 def get_buildings() -> list[Building]:
     return [
         TavernBuilding(),
         SmokeryBuilding(),
         PlainBuilding.from_seconds("fisher's houses", 26, 59, 1, Item.fish),
         PlainBuilding.from_seconds("forester's houses", 24, 46, 1, Item.tree),
+        PlainBuilding.from_seconds("woodcutter's houses", 49, 89, 1, Item.log),
+        PlainBuilding.from_seconds("wells", 44, 44, 1, Item.water),
+        PlainBuilding.from_seconds("farms", 49, 67, 1, Item.barley),
+        PlainBuilding(
+            "coal mines",
+            Ivec({Item.ration: 1}),
+            rate_from_seconds(2 * 41),
+            Ivec({Item.coal: 2}),
+        ),
+        PlainBuilding(
+            "rock mines",
+            Ivec({Item.ration: 1}),
+            rate_from_seconds(2 * 46),
+            Ivec({Item.granite: 2}),
+        ),
+        PlainBuilding(
+            "clay pits",
+            Ivec({Item.water: 1}),
+            rate_from_seconds((55, 73)),
+            Ivec({Item.clay: 1}),
+        ),
+        PlainBuilding(
+            "brick kilns",
+            Ivec({Item.coal: 1, Item.clay: 3, Item.granite: 1}),
+            rate_from_seconds(3 * 30),
+            Ivec({Item.brick: 3}),
+        ),
     ]
 
 

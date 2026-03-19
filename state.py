@@ -108,7 +108,9 @@ def main():
         infos.append(i)
 
     shortages = state.get_shortages_ips(buildings)
-    st.write("shortages", shortages.as_ipm())
+
+    with st.sidebar:
+        st.write("shortages", shortages.as_ipm())
 
     for b, i in zip(buildings, infos, strict=True):
         match b.can_fulfill(shortages):
