@@ -11,11 +11,11 @@ from widelands_planner import state
 def st_building_count(
     building: state.Building,
 ) -> tuple[state.BuildingCount, DeltaGenerator]:
-    match building:
-        case state.TavernBuilding():
-            name = building.name
-            with st.container(border=True):
-                st.subheader(name)
+    with st.container(border=True, width=200):
+        name = building.name
+        st.write(f"**{name}**")
+        match building:
+            case state.TavernBuilding():
                 count = st.number_input(
                     "count",
                     min_value=0,
@@ -47,10 +47,7 @@ def st_building_count(
                     ),
                 ), info
 
-        case state.SmokeryBuilding():
-            name = building.name
-            with st.container(border=True):
-                st.subheader(name)
+            case state.SmokeryBuilding():
                 count = st.number_input(
                     name,
                     min_value=0,
@@ -71,10 +68,7 @@ def st_building_count(
                     count, state.ConfiguredSmokeryBuilding(building, fish_vs_meat)
                 ), info
 
-        case state.PlainBuilding():
-            name = building.name
-            with st.container(border=True):
-                st.subheader(name)
+            case state.PlainBuilding():
                 count = st.number_input(
                     name,
                     min_value=0,
@@ -87,6 +81,7 @@ def st_building_count(
 
 
 def main():
+    st.set_page_config(page_title="widelands planner", layout="wide")
     st.write(datetime.now())
 
     # buildings: list[state.BuildingCount] = [
@@ -102,10 +97,11 @@ def main():
 
     buildings: list[state.BuildingCount] = []
     infos: list[DeltaGenerator] = []
-    for building in state.get_buildings():
-        b, i = st_building_count(building)
-        buildings.append(b)
-        infos.append(i)
+    with st.container(horizontal=True, horizontal_alignment="left", border=False):
+        for building in sorted(state.get_buildings(), key=lambda b: b.name):
+            b, i = st_building_count(building)
+            buildings.append(b)
+            infos.append(i)
 
     shortages = state.get_shortages_ips(buildings)
 
