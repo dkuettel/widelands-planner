@@ -15,7 +15,14 @@ def st_building_count(
         case state.TavernBuilding():
             name = building.name
             with st.container(border=True):
-                count = st.number_input(name, min_value=0, value=0, key=f"{name}/count")
+                st.subheader(name)
+                count = st.number_input(
+                    "count",
+                    min_value=0,
+                    value=0,
+                    key=f"{name}/count",
+                    label_visibility="collapsed",
+                )
                 info = st.empty()
                 fruit_vs_bread = 1 - st.slider(
                     label="<- fruit vs bread ->",
@@ -43,7 +50,14 @@ def st_building_count(
         case state.SmokeryBuilding():
             name = building.name
             with st.container(border=True):
-                count = st.number_input(name, min_value=0, value=0, key=f"{name}/count")
+                st.subheader(name)
+                count = st.number_input(
+                    name,
+                    min_value=0,
+                    value=0,
+                    key=f"{name}/count",
+                    label_visibility="collapsed",
+                )
                 info = st.empty()
                 fish_vs_meat = 1 - st.slider(
                     label="<- fish vs meat ->",
@@ -60,7 +74,14 @@ def st_building_count(
         case state.PlainBuilding():
             name = building.name
             with st.container(border=True):
-                count = st.number_input(name, min_value=0, value=0, key=f"{name}/count")
+                st.subheader(name)
+                count = st.number_input(
+                    name,
+                    min_value=0,
+                    value=0,
+                    key=f"{name}/count",
+                    label_visibility="collapsed",
+                )
                 info = st.empty()
                 return state.BuildingCount(count, building), info
 

@@ -105,12 +105,14 @@ class PlainBuilding:
 @dataclass(frozen=True)
 class TavernBuilding:
     name: Literal["taverns"] = "taverns"
+    rate: float = 1 / 37
+    item: Item = Item.ration
 
     def __post_init__(self):
         assert self.name
 
     def takes_ips(self, fruit_vs_bread: float, fish_vs_meat: float) -> Ivec:
-        r = 1 / (2 * 37)  # two rations from two inputs (one of each)
+        r = self.rate / 2  # we make two rations from two inputs (one of each type)
         return Ivec(
             {
                 Item.fruit: r * fruit_vs_bread,
@@ -125,8 +127,10 @@ class TavernBuilding:
         return Ivec({Item.bread: 2 * r})
 
     def can_fulfill(self, shortages: Ivec) -> None | str:
-        # TODO todo
-        return None
+        s = shortages[self.item]
+        if s == 0:
+            return None
+        return f"add {s / self.rate:.1f} for {self.item}"
 
 
 @dataclass(frozen=True)
@@ -154,36 +158,41 @@ class ConfiguredTavernBuilding:
 @dataclass(frozen=True)
 class SmokeryBuilding:
     name: Literal["smokeries"] = "smokeries"
+    rate: float = 1 / 27
 
     def __post_init__(self):
         assert self.name
 
     def takes_ips(self, fish_vs_meat: float) -> Ivec:
-        r = 1 / 27  # one smoked thing from one raw thing and half a log
         return Ivec(
             {
-                Item.log: 0.5 * r,
-                Item.fish: r * fish_vs_meat,
-                Item.meat: r * (1 - fish_vs_meat),
+                Item.log: 0.5 * self.rate,
+                Item.fish: self.rate * fish_vs_meat,
+                Item.meat: self.rate * (1 - fish_vs_meat),
             }
         )
 
     def makes_ips(self, fish_vs_meat: float) -> Ivec:
-        r = 1 / 27  # one smoked thing from one raw thing and half a log
         return Ivec(
             {
-                Item.smoked_fish: r * fish_vs_meat,
-                Item.smoked_meat: r * (1 - fish_vs_meat),
+                Item.smoked_fish: self.rate * fish_vs_meat,
+                Item.smoked_meat: self.rate * (1 - fish_vs_meat),
             }
         )
 
-    def can_fulfill(self, shortages: Ivec) -> None | str:
-        s = shortages[Item.smoked_fish] + shortages[Item.smoked_meat]
+    def can_fulfill(self, fish_vs_meat: float, shortages: Ivec) -> None | str:
+        s_fish = fish_vs_meat * shortages[Item.smoked_fish]
+        s_meat = (1 - fish_vs_meat) * shortages[Item.smoked_meat]
+        s = s_fish + s_meat
         if s == 0:
             return None
-        r = 1 / 27  # one smoked thing from one raw thing and half a log
-        # TODO use fish_vs_meat ?
-        return f"add {s / r:.1f} for smoked fish and/or smoked_meat"
+        who: list[str] = []
+        if s_fish > 0:
+            who.append(Item.smoked_fish.value)
+        if s_meat > 0:
+            who.append(Item.smoked_meat.value)
+        who_str = " and ".join(who)
+        return f"add {s / self.rate:.1f} for {who_str}"
 
 
 @dataclass(frozen=True)
@@ -203,7 +212,7 @@ class ConfiguredSmokeryBuilding:
         return self.building.makes_ips(self.fish_vs_meat)
 
     def can_fulfill(self, shortages: Ivec) -> None | str:
-        return self.building.can_fulfill(shortages)
+        return self.building.can_fulfill(self.fish_vs_meat, shortages)
 
 
 type Building = PlainBuilding | TavernBuilding | SmokeryBuilding
