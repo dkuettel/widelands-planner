@@ -22,6 +22,9 @@ class Item(Enum):
     granite = "granite"
     clay = "clay"
     brick = "brick"
+    reed = "reed"
+    berry_bush = "berry bush"  # TODO make fruit bush and honey bush? they coincide
+    beer = "beer"
 
 
 @dataclass(frozen=True)
@@ -270,9 +273,15 @@ def get_buildings() -> list[Building]:
         SmokeryBuilding(),
         PlainBuilding.from_seconds("fisher's houses", 26, 59, 1, Item.fish),
         PlainBuilding.from_seconds("forester's houses", 24, 46, 1, Item.tree),
-        PlainBuilding.from_seconds("woodcutter's houses", 49, 89, 1, Item.log),
+        PlainBuilding(
+            "woodcutter's houses",
+            Ivec({Item.tree: 1}),
+            rate_from_seconds((49, 89)),
+            Ivec({Item.log: 1}),
+        ),
         PlainBuilding.from_seconds("wells", 44, 44, 1, Item.water),
         PlainBuilding.from_seconds("farms", 49, 67, 1, Item.barley),
+        PlainBuilding.from_seconds("reed farms", 52, 67, 1, Item.reed),
         PlainBuilding(
             "coal mines",
             Ivec({Item.ration: 1}),
@@ -296,6 +305,19 @@ def get_buildings() -> list[Building]:
             Ivec({Item.coal: 1, Item.clay: 3, Item.granite: 1}),
             rate_from_seconds(3 * 30),
             Ivec({Item.brick: 3}),
+        ),
+        PlainBuilding(
+            "fruit collector's houses",
+            Ivec({Item.berry_bush: 1}),
+            rate_from_seconds((37, 62)),
+            Ivec({Item.fruit: 1}),
+        ),
+        PlainBuilding.from_seconds("berry farms", 33, 51, 1, Item.berry_bush),
+        PlainBuilding(
+            "breweries",
+            Ivec({Item.water: 1, Item.barley: 1}),
+            rate_from_seconds(64),
+            Ivec({Item.beer: 1}),
         ),
     ]
 
