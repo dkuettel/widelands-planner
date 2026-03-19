@@ -147,7 +147,7 @@ class TavernBuilding:
         s = shortages[self.item]
         if s == 0:
             return None
-        return f"add {s / self.rate:.1f} for {self.item}"
+        return f"add {s / self.rate:.1f} for {self.item.value}"
 
 
 @dataclass(frozen=True)
@@ -268,7 +268,7 @@ def rate_from_seconds(seconds: float | tuple[float, float]) -> float:
 
 
 def get_buildings() -> list[Building]:
-    return [
+    buildings = [
         TavernBuilding(),
         SmokeryBuilding(),
         PlainBuilding.from_seconds("fisher's houses", 26, 59, 1, Item.fish),
@@ -319,7 +319,15 @@ def get_buildings() -> list[Building]:
             rate_from_seconds(64),
             Ivec({Item.beer: 1}),
         ),
+        PlainBuilding(
+            "bakeries",
+            Ivec({Item.barley: 1, Item.water: 1}),
+            rate_from_seconds(44),
+            Ivec({Item.bread: 1}),
+        ),
     ]
+    assert len(buildings) == len({b.name for b in buildings})
+    return buildings
 
 
 def get_takes_ips(buildings: list[BuildingCount]) -> Ivec:
