@@ -106,14 +106,18 @@ def main():
     shortages = state.get_shortages_ips(buildings)
 
     with st.sidebar:
-        st.write("shortages", shortages.as_ipm())
+        st.header("shortages")
+        st.json(shortages.as_ipm())
 
-    for b, i in zip(buildings, infos, strict=True):
-        match b.can_fulfill(shortages):
-            case None:
-                i.write("no issues")
-            case str(msg):
-                i.write(f":warning: {msg}")
+        st.header("actions")
+        with st.container(gap=None):
+            for b, i in zip(buildings, infos, strict=True):
+                match b.can_fulfill(shortages):
+                    case None:
+                        i.write("no issues")
+                    case str(msg):
+                        i.write(f":warning: {msg}")
+                        st.write(f"**{b.get_name()}**: {msg}")
 
     # taverns_info.write("no issues")
     # if shortages[state.Item.smoked_fish] > 0 or shortages[state.Item.smoked_meat] > 0:

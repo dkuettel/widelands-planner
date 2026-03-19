@@ -243,6 +243,9 @@ class BuildingCount:
     def __post_init__(self):
         assert self.count >= 0
 
+    def get_name(self) -> str:
+        return self.building.name
+
     def takes_ips(self) -> Ivec:
         return self.building.takes_ips().smul(self.count)
 
