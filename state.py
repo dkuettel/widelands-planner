@@ -82,12 +82,6 @@ def st_building_count(
 
 def main():
     st.set_page_config(page_title="widelands planner", layout="wide")
-    st.write(datetime.now())
-
-    # buildings: list[state.BuildingCount] = [
-    #     state.TavernCount(3, 1, 1),
-    #     state.SmokeryCount(1, 1),
-    # ]
 
     # st.json(state.get_makes(buildings).as_human())
     # st.json(state.get_takes(buildings).as_human())
@@ -118,20 +112,6 @@ def main():
                     case str(msg):
                         i.write(f":warning: {msg}")
                         st.write(f"**{b.get_name()}**: {msg}")
-
-    # taverns_info.write("no issues")
-    # if shortages[state.Item.smoked_fish] > 0 or shortages[state.Item.smoked_meat] > 0:
-    #     smokeries_info.write(":warning: could use some")
-    # else:
-    #     smokeries_info.write("no issues")
-    # if shortages[state.Item.fish] > 0:
-    #     add = (
-    #         shortages[state.Item.fish]
-    #         / fishers_houses.__replace__(count=1).makes_ips()[state.Item.fish]
-    #     )
-    #     fishers_houses_info.write(f":warning: could use {add:.1f} more")
-    # else:
-    #     fishers_houses_info.write("no issues")
 
 
 if __name__ == "__main__":
