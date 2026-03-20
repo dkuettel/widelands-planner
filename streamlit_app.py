@@ -93,7 +93,7 @@ def main():
     blocks = blocks or ["main"]
 
     with st.container():
-        new_tab_name = st.text_input("new tab name", key="input/new tab name")
+        new_tab_name = st.text_input("new block name", key="input/new block name")
         if st.button("add block", key="button/add block"):
             if new_tab_name != "" and new_tab_name not in blocks:
                 blocks.append(new_tab_name)
