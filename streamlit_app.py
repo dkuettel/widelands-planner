@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-from datetime import datetime
-
 import streamlit as st
 from streamlit.delta_generator import DeltaGenerator
 
@@ -80,6 +78,64 @@ def st_building_count(
                 return state.BuildingCount(count, building), info
 
 
+def st_block(block: str):
+    with st.expander("config"):
+        with st.container(horizontal=True):
+            if st.button("delete block", key=f"input/delete block {block}"):
+                blocks = st.session_state.get("state/blocks", []) or ["main"]
+                blocks.remove(block)
+                blocks = blocks or ["main"]
+                st.session_state["state/blocks"] = blocks
+                st.rerun()
+        kinds = st.pills(
+            "block kind",
+            # TODO this make st.session_state contain the full object, not just the name
+            state.get_block_kinds(),
+            format_func=lambda s: s.name,
+            selection_mode="multi",
+            key=f"state/{block}/building kinds",
+        )
+        kind = state.BlockKind.from_many(kinds)
+        buildings = state.get_building_by_names(kind.buildings)
+        buildings = sorted(buildings, key=lambda b: b.name)
+
+    st_imports, st_info, st_exports = st.columns([1, 2, 1], border=True)
+
+    with st_imports, st.container(gap=None):
+        st.write("**imports**")
+        for item in kind.imports:
+            st.write(item.value)
+
+    with st_info, st.container(gap=None):
+        st.write("**info**")
+        actions = st.empty()
+
+    with st_exports, st.container(gap=None):
+        st.write("**exports**")
+        for item in kind.exports:
+            st.write(item.value)
+
+    building_counts: list[state.BuildingCount] = []
+    infos: list[DeltaGenerator] = []
+    with st.container(horizontal=True, horizontal_alignment="left", border=False):
+        for building in buildings:
+            b, i = st_building_count(block, building)
+            building_counts.append(b)
+            infos.append(i)
+
+    _ = state.Block(block, kind.imports, building_counts, kind.exports)
+    shortages = state.get_shortages_ips(building_counts)
+
+    with actions.container(horizontal=False, gap=None):
+        for b, i in zip(building_counts, infos, strict=True):
+            match b.can_fulfill(shortages):
+                case None:
+                    i.write("no issues")
+                case str(msg):
+                    i.write(f":warning: {msg}")
+                    st.write(f"**{b.get_name()}**: {msg}")
+
+
 def main():
     st.set_page_config(page_title="widelands planner", layout="wide")
 
@@ -101,33 +157,8 @@ def main():
                 st.rerun()
 
     for block, tab in zip(blocks, st.tabs(blocks), strict=True):
-        buildings: list[state.BuildingCount] = []
-        infos: list[DeltaGenerator] = []
-
         with tab:
-            with st.container(horizontal=True):
-                if st.button("delete block", key=f"input/delete block {block}"):
-                    blocks.remove(block)
-                    blocks = blocks or ["main"]
-                    st.session_state["state/blocks"] = blocks
-                    st.rerun()
-                actions = st.empty()
-            with st.container(
-                horizontal=True, horizontal_alignment="left", border=False
-            ):
-                for building in sorted(state.get_buildings(), key=lambda b: b.name):
-                    b, i = st_building_count(block, building)
-                    buildings.append(b)
-                    infos.append(i)
-            shortages = state.get_shortages_ips(buildings)
-            with actions.container(horizontal=True):
-                for b, i in zip(buildings, infos, strict=True):
-                    match b.can_fulfill(shortages):
-                        case None:
-                            i.write("no issues")
-                        case str(msg):
-                            i.write(f":warning: {msg}")
-                            st.write(f"**{b.get_name()}**: {msg}")
+            st_block(block)
 
     # with st.sidebar:
     #     st.header("shortages")
