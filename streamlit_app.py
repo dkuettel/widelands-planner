@@ -96,18 +96,26 @@ def st_block(block: str):
             key=f"state/{block}/building kinds",
         )
         kind = state.BlockKind.from_many(kinds)
-        buildings = state.get_building_by_names(kind.buildings)
-        buildings = sorted(buildings, key=lambda b: b.name)
 
     st_imports, st_info, st_exports = st.columns([1, 2, 1], border=True)
+    st_active = st.container(horizontal=True, horizontal_alignment="left", border=False)
+    st_inactive = st.expander("other buildings").container(
+        horizontal=True, horizontal_alignment="left", border=False
+    )
 
     building_counts: list[state.BuildingCount] = []
     infos: list[DeltaGenerator] = []
-    with st.container(horizontal=True, horizontal_alignment="left", border=False):
-        for building in buildings:
-            b, i = st_building_count(block, building)
-            building_counts.append(b)
-            infos.append(i)
+    buildings = state.get_buildings()
+    buildings = sorted(buildings, key=lambda b: b.name)
+    for building in buildings:
+        if building.name in kind.buildings:
+            with st_active:
+                b, i = st_building_count(block, building)
+        else:
+            with st_inactive:
+                b, i = st_building_count(block, building)
+        building_counts.append(b)
+        infos.append(i)
 
     balance = state.get_block_balance(
         state.Block(block, kind.imports, building_counts, kind.exports)
