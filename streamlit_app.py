@@ -101,20 +101,6 @@ def st_block(block: str):
 
     st_imports, st_info, st_exports = st.columns([1, 2, 1], border=True)
 
-    with st_imports, st.container(gap=None):
-        st.write("**imports**")
-        for item in kind.imports:
-            st.write(item.value)
-
-    with st_info, st.container(gap=None):
-        st.write("**info**")
-        actions = st.empty()
-
-    with st_exports, st.container(gap=None):
-        st.write("**exports**")
-        for item in kind.exports:
-            st.write(item.value)
-
     building_counts: list[state.BuildingCount] = []
     infos: list[DeltaGenerator] = []
     with st.container(horizontal=True, horizontal_alignment="left", border=False):
@@ -123,17 +109,31 @@ def st_block(block: str):
             building_counts.append(b)
             infos.append(i)
 
-    _ = state.Block(block, kind.imports, building_counts, kind.exports)
-    shortages = state.get_shortages_ips(building_counts)
+    balance = state.get_block_balance(
+        state.Block(block, kind.imports, building_counts, kind.exports)
+    )
 
-    with actions.container(horizontal=False, gap=None):
-        for b, i in zip(building_counts, infos, strict=True):
-            match b.can_fulfill(shortages):
-                case None:
-                    i.write("no issues")
-                case str(msg):
-                    i.write(f":warning: {msg}")
-                    st.write(f"**{b.get_name()}**: {msg}")
+    with st_imports, st.container(gap=None):
+        st.write("**imports**")
+        st.json(balance.imports.as_ipm())
+
+    with st_info, st.container(gap=None):
+        st.write("**info**")
+        st.json(balance.local.as_ipm())
+        # actions = st.empty()
+
+    with st_exports, st.container(gap=None):
+        st.write("**exports**")
+        st.json(balance.exports.as_ipm())
+
+    # with actions.container(horizontal=False, gap=None):
+    #     for b, i in zip(building_counts, infos, strict=True):
+    #         match b.can_fulfill(shortages):
+    #             case None:
+    #                 i.write("no issues")
+    #             case str(msg):
+    #                 i.write(f":warning: {msg}")
+    #                 st.write(f"**{b.get_name()}**: {msg}")
 
 
 def main():

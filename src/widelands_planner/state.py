@@ -430,6 +430,41 @@ def get_usage_ratios(buildings: list[BuildingCount]) -> Ivec:
 @dataclass(frozen=True)
 class Block:
     name: str
+    # TODO how to check that this is consistent? no overlaps?
     imports: set[Item]
     buildings: list[BuildingCount]
     exports: set[Item]
+
+
+@dataclass(frozen=True)
+class BlockBalance:
+    imports: Ivec
+    local: Ivec
+    exports: Ivec
+
+
+def get_block_balance(block: Block) -> BlockBalance:
+    balance = get_balance_ips(block.buildings)
+    exports: dict[Item, float] = dict()
+    local: dict[Item, float] = dict()
+    imports: dict[Item, float] = dict()
+    for i, b in balance.data.items():
+        if b == 0:
+            continue
+        if i in block.imports:
+            if b > 0:
+                imports[i] = 0
+            else:
+                imports[i] = -b
+        elif i in block.exports:
+            if b > 0:
+                exports[i] = b
+            else:
+                local[i] = b
+        else:
+            local[i] = b
+    return BlockBalance(
+        imports=Ivec(imports),
+        local=Ivec(local),
+        exports=Ivec(exports),
+    )
