@@ -154,7 +154,7 @@ def st_block(block_id: int) -> state.BlockBalance:
             st.expander("edit"),
             st.container(border=False, horizontal=True, vertical_alignment="bottom"),
         ):
-            st.text_input("name", value="unnamed", key=get_block_name_key(block_id))
+            st.text_input("name", key=get_block_name_key(block_id))
             st.button(
                 "delete",
                 key=f"key/blocks/{block_id}/delete",
