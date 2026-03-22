@@ -170,7 +170,6 @@ def st_block(block_id: int) -> state.BlockBalance:
             imports = st.multiselect(
                 "imports",
                 items,
-                format_func=lambda i: i.value,
                 key=f"state/blocks/{block_id}/imports",
             )
             st_imports = st.empty()
@@ -185,7 +184,6 @@ def st_block(block_id: int) -> state.BlockBalance:
             exports = st.multiselect(
                 "exports",
                 items,
-                format_func=lambda i: i.value,
                 key=f"state/blocks/{block_id}/exports",
             )
             st_exports = st.empty()
