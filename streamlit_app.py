@@ -171,12 +171,6 @@ def st_block(block: str):
 def main():
     st.set_page_config(page_title="widelands planner", layout="wide")
 
-    # st.json(state.get_makes(buildings).as_human())
-    # st.json(state.get_takes(buildings).as_human())
-    # st.json(state.get_balance(buildings).as_human())
-    # st.json(state.get_shortages_ips(buildings).as_ipm())
-    # st.json(state.get_usage_ratios(buildings).as_percentages())
-
     blocks: list[str] = st.session_state.setdefault("state/blocks", ["main"])
     blocks = blocks or ["main"]
 
@@ -191,10 +185,6 @@ def main():
     for block, tab in zip(blocks, st.tabs(blocks), strict=True):
         with tab:
             st_block(block)
-
-    # with st.sidebar:
-    #     st.header("shortages")
-    #     st.json(shortages.as_ipm())
 
 
 if __name__ == "__main__":

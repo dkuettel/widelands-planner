@@ -309,9 +309,6 @@ class BuildingCount:
     def makes_ips(self) -> Ivec:
         return self.building.makes_ips().smul(self.count)
 
-    def can_fulfill(self, shortages: Ivec) -> None | str:
-        return self.building.can_fulfill(shortages)
-
 
 def rate_from_seconds(seconds: float | tuple[float, float]) -> float:
     match seconds:
