@@ -455,6 +455,6 @@ def building_count_from_ips(item: Item, ips: float) -> list[tuple[Bname, float]]
     counts: list[tuple[Bname, float]] = []
     for building in get_buildings():
         c = building.representative_count_from_ips(item, ips)
-        if c > 0:
+        if c != 0:
             counts.append((building.name, c))
     return counts
