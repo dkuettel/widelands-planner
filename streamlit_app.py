@@ -80,12 +80,18 @@ def st_building_count(
                 assert False, never  # pyright: ignore[reportUnreachable]
 
 
-def delete_block(block: str):
+def callback_add_block(block: str):
+    blocks = st.session_state.get("state/blocks", []) or ["main"]
+    if block != "" and block not in blocks:
+        blocks.append(block)
+    st.session_state["state/blocks"] = blocks
+
+
+def callback_delete_block(block: str):
     blocks = st.session_state.get("state/blocks", []) or ["main"]
     blocks.remove(block)
     blocks = blocks or ["main"]
     st.session_state["state/blocks"] = blocks
-    st.rerun()
 
 
 def st_ivec(ivec: state.Ivec):
@@ -108,10 +114,21 @@ def st_block(block: str) -> state.BlockBalance:
             st.expander("block"),
             st.container(border=False, horizontal=True, vertical_alignment="bottom"),
         ):
-            # TODO not sure how that works here
-            st.text_input("name", value=block, key=f"key/{block}/name")
-            if st.button("delete", key=f"key/{block}/delete"):
-                delete_block(block)
+            st.text_input(
+                "name",
+                value=block,
+                key=f"key/{block}/name",
+                # TODO not sure how that works here
+                # probably have to make ids for blocks, and then we can change the names
+                # now all keys would have to change too!
+                disabled=True,
+            )
+            st.button(
+                "delete",
+                key=f"key/{block}/delete",
+                on_click=callback_delete_block,
+                args=(block,),
+            )
 
         with st.container(border=True):
             imports = st.multiselect(
@@ -179,11 +196,12 @@ def main():
 
     with st.container():
         new_tab_name = st.text_input("new block name", key="input/new block name")
-        if st.button("add block", key="button/add block"):
-            if new_tab_name != "" and new_tab_name not in blocks:
-                blocks.append(new_tab_name)
-                st.session_state["state/blocks"] = blocks
-                st.rerun()
+        st.button(
+            "add block",
+            key="button/add block",
+            on_click=callback_add_block,
+            args=(new_tab_name,),
+        )
 
     balances: list[state.BlockBalance] = []
     for block, tab in zip(blocks, st.tabs(blocks), strict=True):
