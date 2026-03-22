@@ -135,13 +135,17 @@ def st_building_count(
 
 
 def st_ivec(ivec: state.Ivec):
+    deficit = st.container(gap=None)
+    deficit.write("**deficit**")
+    surplus = st.container(gap=None)
+    surplus.write("**surplus**")
     for i, ips in ivec.sorted():
         counts = state.building_count_from_ips(i, ips)
         rep = " or ".join(f"{c:.1f} {b.value}" for b, c in counts)
         if ips > 0:
-            st.write(f"{60 * ips:.1f} {i.value}/min = {rep}")
+            surplus.write(f"- {60 * ips:.1f} {i.value}/min = {rep}")
         else:
-            st.write(f"**{60 * ips:.1f} {i.value}/min = {rep}**")
+            deficit.write(f"- {60 * ips:.1f} {i.value}/min = {rep}")
 
 
 def st_block(block_id: int) -> state.BlockBalance:
