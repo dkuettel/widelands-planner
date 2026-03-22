@@ -6,8 +6,45 @@ from streamlit.delta_generator import DeltaGenerator
 from widelands_planner import state
 
 
+def get_block_ids() -> list[int]:
+    ids: list[int] | None = st.session_state.get("state/block_ids")
+    if ids is None:
+        st.session_state["state/next_block_id"] = 0
+        ids = []
+        st.session_state["state/block_ids"] = ids
+    if len(ids) == 0:
+        next_id = st.session_state["state/next_block_id"]
+        ids = [next_id]
+        st.session_state["state/block_ids"] = ids
+        st.session_state["state/next_block_id"] = next_id + 1
+    return ids
+
+
+def get_block_name_key(id: int) -> str:
+    return f"state/blocks/{id}/name"
+
+
+def get_block_name(id: int) -> str:
+    return st.session_state.setdefault(get_block_name_key(id), "unnamed")
+
+
+def add_block(name: str):
+    id = st.session_state.get("state/next_block_id", 1)
+    ids = get_block_ids()
+    ids.append(id)
+    st.session_state["state/block_ids"] = ids
+    st.session_state[f"state/blocks/{id}/name"] = name
+    st.session_state["state/next_block_id"] = id + 1
+
+
+def remove_block(block_id: int):
+    block_ids = get_block_ids()
+    block_ids.remove(block_id)
+    st.session_state["state/block_ids"] = block_ids
+
+
 def st_building_count(
-    block: str, name: str, building: state.Building
+    block_id: int, name: str, building: state.Building
 ) -> tuple[state.BuildingCount, DeltaGenerator]:
     with st.container(border=True, width=200):
         st.write(f"**{name}**")
@@ -17,7 +54,7 @@ def st_building_count(
                     "count",
                     min_value=0,
                     value=0,
-                    key=f"state/{block}/{name}/count",
+                    key=f"state/blocks/{block_id}/buildings/{name}/count",
                     label_visibility="collapsed",
                 )
                 info = st.empty()
@@ -27,7 +64,7 @@ def st_building_count(
                     value=0.5,
                     max_value=1.0,
                     step=0.01,
-                    key=f"state/{block}/{name}/fruit_vs_bread",
+                    key=f"state/blocks/{block_id}/buildings/{name}/fruit_vs_bread",
                 )
                 fish_vs_meat = 1 - st.slider(
                     label="<- fish vs meat ->",
@@ -35,7 +72,7 @@ def st_building_count(
                     value=0.5,
                     max_value=1.0,
                     step=0.01,
-                    key=f"state/{block}/{name}/fish_vs_meat",
+                    key=f"state/blocks/{block_id}/buildings/{name}/fish_vs_meat",
                 )
                 return state.BuildingCount(
                     count,
@@ -49,7 +86,7 @@ def st_building_count(
                     name,
                     min_value=0,
                     value=0,
-                    key=f"state/{block}/{name}/count",
+                    key=f"state/blocks/{block_id}/buildings/{name}/count",
                     label_visibility="collapsed",
                 )
                 info = st.empty()
@@ -59,7 +96,7 @@ def st_building_count(
                     value=0.5,
                     max_value=1.0,
                     step=0.01,
-                    key=f"state/{block}/{name}/fish_vs_meat",
+                    key=f"state/blocks/{block_id}/buildings/{name}/fish_vs_meat",
                 )
                 return state.BuildingCount(
                     count, state.ConfiguredSmokeryBuilding(building, fish_vs_meat)
@@ -70,7 +107,7 @@ def st_building_count(
                     name,
                     min_value=0,
                     value=0,
-                    key=f"state/{block}/{name}/count",
+                    key=f"state/blocks/{block_id}/buildings/{name}/count",
                     label_visibility="collapsed",
                 )
                 info = st.empty()
@@ -78,20 +115,6 @@ def st_building_count(
 
             case _ as never:  # pyright: ignore[reportUnnecessaryComparison]
                 assert False, never  # pyright: ignore[reportUnreachable]
-
-
-def callback_add_block(block: str):
-    blocks = st.session_state.get("state/blocks", []) or ["main"]
-    if block != "" and block not in blocks:
-        blocks.append(block)
-    st.session_state["state/blocks"] = blocks
-
-
-def callback_delete_block(block: str):
-    blocks = st.session_state.get("state/blocks", []) or ["main"]
-    blocks.remove(block)
-    blocks = blocks or ["main"]
-    st.session_state["state/blocks"] = blocks
 
 
 def st_ivec(ivec: state.Ivec):
@@ -104,7 +127,7 @@ def st_ivec(ivec: state.Ivec):
             st.write(f"**{60 * ips:.1f} {i.value}/min = {rep}**")
 
 
-def st_block(block: str) -> state.BlockBalance:
+def st_block(block_id: int) -> state.BlockBalance:
     items = state.get_items()
     buildings = state.get_buildings()
 
@@ -114,20 +137,12 @@ def st_block(block: str) -> state.BlockBalance:
             st.expander("block"),
             st.container(border=False, horizontal=True, vertical_alignment="bottom"),
         ):
-            st.text_input(
-                "name",
-                value=block,
-                key=f"key/{block}/name",
-                # TODO not sure how that works here
-                # probably have to make ids for blocks, and then we can change the names
-                # now all keys would have to change too!
-                disabled=True,
-            )
+            st.text_input("name", value="unnamed", key=get_block_name_key(block_id))
             st.button(
                 "delete",
-                key=f"key/{block}/delete",
-                on_click=callback_delete_block,
-                args=(block,),
+                key=f"key/blocks/{block_id}/delete",
+                on_click=remove_block,
+                args=(block_id,),
             )
 
         with st.container(border=True):
@@ -135,14 +150,14 @@ def st_block(block: str) -> state.BlockBalance:
                 "imports",
                 items,
                 format_func=lambda i: i.value,
-                key=f"state/{block}/imports",
+                key=f"state/blocks/{block_id}/imports",
             )
             st_imports = st.empty()
         with st.container(border=True):
             locals = st.multiselect(
                 "locals",
                 buildings,
-                key=f"state/{block}/locals",
+                key=f"state/blocks/{block_id}/locals",
             )
             st_locals = st.empty()
         with st.container(border=True):
@@ -150,7 +165,7 @@ def st_block(block: str) -> state.BlockBalance:
                 "exports",
                 items,
                 format_func=lambda i: i.value,
-                key=f"state/{block}/exports",
+                key=f"state/blocks/{block_id}/exports",
             )
             st_exports = st.empty()
 
@@ -163,17 +178,17 @@ def st_block(block: str) -> state.BlockBalance:
             st.container(horizontal=True),
         ):
             for name in locals:
-                b, i = st_building_count(block, name, buildings[name])
+                b, i = st_building_count(block_id, name, buildings[name])
                 building_counts.append(b)
                 infos.append(i)
         with st.expander("more buildings"), st.container(horizontal=True):
             for name in sorted(set(buildings) - set(locals)):
-                b, i = st_building_count(block, name, buildings[name])
+                b, i = st_building_count(block_id, name, buildings[name])
                 building_counts.append(b)
                 infos.append(i)
 
     balance = state.get_block_balance(
-        state.Block(block, set(imports), building_counts, set(exports))
+        state.Block(set(imports), building_counts, set(exports))
     )
 
     with st_imports.container(gap=None):
@@ -191,22 +206,22 @@ def st_block(block: str) -> state.BlockBalance:
 def main():
     st.set_page_config(page_title="widelands planner", layout="wide")
 
-    blocks: list[str] = st.session_state.setdefault("state/blocks", ["main"])
-    blocks = blocks or ["main"]
-
     with st.container():
-        new_tab_name = st.text_input("new block name", key="input/new block name")
+        new_block_name = st.text_input("new block name", key="key/new block name")
         st.button(
-            "add block",
-            key="button/add block",
-            on_click=callback_add_block,
-            args=(new_tab_name,),
+            "add new block",
+            key="key/add new block",
+            on_click=add_block,
+            args=(new_block_name,),
         )
 
+    block_ids = get_block_ids()
+    block_names = [get_block_name(i) for i in block_ids]
+
     balances: list[state.BlockBalance] = []
-    for block, tab in zip(blocks, st.tabs(blocks), strict=True):
+    for block_id, tab in zip(block_ids, st.tabs(block_names), strict=True):
         with tab:
-            balances.append(st_block(block))
+            balances.append(st_block(block_id))
 
     balance = state.get_global_balance(balances)
 

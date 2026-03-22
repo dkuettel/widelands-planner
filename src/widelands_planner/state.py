@@ -378,7 +378,6 @@ def get_usage_ratios(buildings: list[BuildingCount]) -> Ivec:
 
 @dataclass(frozen=True)
 class Block:
-    name: str
     # TODO how to check that this is consistent? no overlaps?
     imports: set[Item]
     buildings: list[BuildingCount]
