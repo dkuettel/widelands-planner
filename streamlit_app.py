@@ -7,10 +7,9 @@ from widelands_planner import state
 
 
 def st_building_count(
-    block: str, building: state.Building
+    block: str, name: str, building: state.Building
 ) -> tuple[state.BuildingCount, DeltaGenerator]:
     with st.container(border=True, width=200):
-        name = building.name
         st.write(f"**{name}**")
         match building:
             case state.TavernBuilding():
@@ -77,8 +76,8 @@ def st_building_count(
                 info = st.empty()
                 return state.BuildingCount(count, building), info
 
-            case _ as never:
-                assert False, never
+            case _ as never:  # pyright: ignore[reportUnnecessaryComparison]
+                assert False, never  # pyright: ignore[reportUnreachable]
 
 
 def delete_block(block: str):
@@ -100,8 +99,8 @@ def st_ivec(ivec: state.Ivec):
 
 
 def st_block(block: str) -> state.BlockBalance:
-    items = sorted(state.Item, key=lambda i: i.value)
-    buildings = sorted(state.get_buildings(), key=lambda b: b.name)
+    items = state.get_items()
+    buildings = state.get_buildings()
 
     st_meta, st_buildings = st.columns([1, 2])
     with st_meta:
@@ -126,7 +125,6 @@ def st_block(block: str) -> state.BlockBalance:
             locals = st.multiselect(
                 "locals",
                 buildings,
-                format_func=lambda i: i.name,
                 key=f"state/{block}/locals",
             )
             st_locals = st.empty()
@@ -147,18 +145,15 @@ def st_block(block: str) -> state.BlockBalance:
             st.expander("local buildings", expanded=True),
             st.container(horizontal=True),
         ):
-            for building in locals:
-                b, i = st_building_count(block, building)
+            for name in locals:
+                b, i = st_building_count(block, name, buildings[name])
                 building_counts.append(b)
                 infos.append(i)
         with st.expander("more buildings"), st.container(horizontal=True):
-            # TODO this is not quite the right identity, we could have twice the same name but different building
-            local_names = {b.name for b in locals}
-            for building in buildings:
-                if building.name not in local_names:
-                    b, i = st_building_count(block, building)
-                    building_counts.append(b)
-                    infos.append(i)
+            for name in sorted(set(buildings) - set(locals)):
+                b, i = st_building_count(block, name, buildings[name])
+                building_counts.append(b)
+                infos.append(i)
 
     balance = state.get_block_balance(
         state.Block(block, set(imports), building_counts, set(exports))

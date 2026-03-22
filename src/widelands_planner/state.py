@@ -4,7 +4,6 @@ import math
 from collections.abc import Iterator
 from dataclasses import dataclass
 from enum import StrEnum
-from typing import Literal
 
 
 class Item(StrEnum):
@@ -26,6 +25,10 @@ class Item(StrEnum):
     reed = "reed"
     berry_bush = "berry bush"  # TODO make fruit bush and honey bush? they coincide
     beer = "beer"
+
+
+def get_items() -> list[Item]:
+    return sorted(Item, key=lambda i: i.value)
 
 
 class Bname(StrEnum):
@@ -155,19 +158,14 @@ class Ivec:
 
 @dataclass(frozen=True)
 class PlainBuilding:
-    name: Bname
     takes: Ivec
     rate: float  # "takes" into "makes" per second
     makes: Ivec
 
     @classmethod
-    def from_seconds(
-        cls, name: Bname, short: float, long: float, count: int, item: Item
-    ):
+    def from_seconds(cls, short: float, long: float, count: int, item: Item):
         # TODO do we want to adjust this? arent we often in the more optimal case?
-        return cls(
-            name, Ivec.from_zeros(), 1 / ((short + long) / 2), Ivec({item: count})
-        )
+        return cls(Ivec.from_zeros(), 1 / ((short + long) / 2), Ivec({item: count}))
 
     def __post_init__(self):
         assert self.rate >= 0
@@ -188,12 +186,8 @@ class PlainBuilding:
 # TODO only models two-input ration production, not the slower one-input possibility
 @dataclass(frozen=True)
 class TavernBuilding:
-    name: Literal[Bname.taverns] = Bname.taverns
     rate: float = 1 / 37
     item: Item = Item.ration
-
-    def __post_init__(self):
-        assert self.name
 
     def takes_ips(self, fruit_vs_bread: float, fish_vs_meat: float) -> Ivec:
         r = self.rate / 2  # we make two rations from two inputs (one of each type)
@@ -222,10 +216,8 @@ class ConfiguredTavernBuilding:
     building: TavernBuilding
     fruit_vs_bread: float
     fish_vs_meat: float
-    name: Literal[Bname.taverns] = Bname.taverns
 
     def __post_init__(self):
-        assert self.name
         assert 0 <= self.fruit_vs_bread <= 1
         assert 0 <= self.fish_vs_meat <= 1
 
@@ -238,11 +230,7 @@ class ConfiguredTavernBuilding:
 
 @dataclass(frozen=True)
 class SmokeryBuilding:
-    name: Literal[Bname.smokeries] = Bname.smokeries
     rate: float = 1 / 27
-
-    def __post_init__(self):
-        assert self.name
 
     def takes_ips(self, fish_vs_meat: float) -> Ivec:
         return Ivec(
@@ -273,11 +261,9 @@ class SmokeryBuilding:
 class ConfiguredSmokeryBuilding:
     building: SmokeryBuilding
     fish_vs_meat: float
-    name: Literal[Bname.smokeries] = Bname.smokeries
 
     def __post_init__(self):
         assert 0 <= self.fish_vs_meat <= 1
-        assert self.name
 
     def takes_ips(self) -> Ivec:
         return self.building.takes_ips(self.fish_vs_meat)
@@ -300,9 +286,6 @@ class BuildingCount:
     def __post_init__(self):
         assert self.count >= 0
 
-    def get_name(self) -> str:
-        return self.building.name
-
     def takes_ips(self) -> Ivec:
         return self.building.takes_ips().smul(self.count)
 
@@ -318,73 +301,58 @@ def rate_from_seconds(seconds: float | tuple[float, float]) -> float:
             return 1 / t
 
 
-def get_buildings() -> list[Building]:
-    buildings = [
-        TavernBuilding(),
-        SmokeryBuilding(),
-        PlainBuilding.from_seconds(Bname.fishers_houses, 26, 59, 1, Item.fish),
-        PlainBuilding.from_seconds(Bname.foresters_houses, 24, 46, 1, Item.tree),
-        PlainBuilding(
-            Bname.woodcutters_houses,
+def get_buildings() -> dict[Bname, Building]:
+    buildings = {
+        Bname.taverns: TavernBuilding(),
+        Bname.smokeries: SmokeryBuilding(),
+        Bname.fishers_houses: PlainBuilding.from_seconds(26, 59, 1, Item.fish),
+        Bname.foresters_houses: PlainBuilding.from_seconds(24, 46, 1, Item.tree),
+        Bname.woodcutters_houses: PlainBuilding(
             Ivec({Item.tree: 1}),
             rate_from_seconds((49, 89)),
             Ivec({Item.log: 1}),
         ),
-        PlainBuilding.from_seconds(Bname.wells, 44, 44, 1, Item.water),
-        PlainBuilding.from_seconds(Bname.farms, 49, 67, 1, Item.barley),
-        PlainBuilding.from_seconds(Bname.reed_farms, 52, 67, 1, Item.reed),
-        PlainBuilding(
-            Bname.coal_mines,
+        Bname.wells: PlainBuilding.from_seconds(44, 44, 1, Item.water),
+        Bname.farms: PlainBuilding.from_seconds(49, 67, 1, Item.barley),
+        Bname.reed_farms: PlainBuilding.from_seconds(52, 67, 1, Item.reed),
+        Bname.coal_mines: PlainBuilding(
             Ivec({Item.ration: 1}),
             rate_from_seconds(2 * 41),
             Ivec({Item.coal: 2}),
         ),
-        PlainBuilding(
-            Bname.rock_mines,
+        Bname.rock_mines: PlainBuilding(
             Ivec({Item.ration: 1}),
             rate_from_seconds(2 * 46),
             Ivec({Item.granite: 2}),
         ),
-        PlainBuilding(
-            Bname.clay_pits,
+        Bname.clay_pits: PlainBuilding(
             Ivec({Item.water: 1}),
             rate_from_seconds((55, 73)),
             Ivec({Item.clay: 1}),
         ),
-        PlainBuilding(
-            Bname.brick_kilns,
+        Bname.brick_kilns: PlainBuilding(
             Ivec({Item.coal: 1, Item.clay: 3, Item.granite: 1}),
             rate_from_seconds(3 * 30),
             Ivec({Item.brick: 3}),
         ),
-        PlainBuilding(
-            Bname.fruit_collectors_houses,
+        Bname.fruit_collectors_houses: PlainBuilding(
             Ivec({Item.berry_bush: 1}),
             rate_from_seconds((37, 62)),
             Ivec({Item.fruit: 1}),
         ),
-        PlainBuilding.from_seconds(Bname.berry_farms, 33, 51, 1, Item.berry_bush),
-        PlainBuilding(
-            Bname.breweries,
+        Bname.berry_farms: PlainBuilding.from_seconds(33, 51, 1, Item.berry_bush),
+        Bname.breweries: PlainBuilding(
             Ivec({Item.water: 1, Item.barley: 1}),
             rate_from_seconds(64),
             Ivec({Item.beer: 1}),
         ),
-        PlainBuilding(
-            Bname.bakeries,
+        Bname.bakeries: PlainBuilding(
             Ivec({Item.barley: 1, Item.water: 1}),
             rate_from_seconds(44),
             Ivec({Item.bread: 1}),
         ),
-    ]
-    assert len(buildings) == len({b.name for b in buildings})
-    return buildings
-
-
-def get_building_by_names(names: set[Bname]) -> list[Building]:
-    buildings = get_buildings()
-    buildings = [b for b in buildings if b.name in names]
-    return buildings
+    }
+    return dict(sorted(buildings.items()))
 
 
 def get_takes_ips(buildings: list[BuildingCount]) -> Ivec:
@@ -459,8 +427,9 @@ def get_global_balance(blocks: list[BlockBalance]) -> Ivec:
 
 def building_count_from_ips(item: Item, ips: float) -> list[tuple[Bname, float]]:
     counts: list[tuple[Bname, float]] = []
-    for building in get_buildings():
+    # TODO keep around?
+    for name, building in get_buildings().items():
         c = building.representative_count_from_ips(item, ips)
         if c != 0:
-            counts.append((building.name, c))
+            counts.append((name, c))
     return counts
