@@ -134,7 +134,7 @@ def st_block(block_id: int) -> state.BlockBalance:
     st_meta, st_buildings = st.columns([1, 2])
     with st_meta:
         with (
-            st.expander("block"),
+            st.expander("edit"),
             st.container(border=False, horizontal=True, vertical_alignment="bottom"),
         ):
             st.text_input("name", value="unnamed", key=get_block_name_key(block_id))
@@ -206,14 +206,15 @@ def st_block(block_id: int) -> state.BlockBalance:
 def main():
     st.set_page_config(page_title="widelands planner", layout="wide")
 
-    with st.container():
-        new_block_name = st.text_input("new block name", key="key/new block name")
-        st.button(
-            "add new block",
-            key="key/add new block",
-            on_click=add_block,
-            args=(new_block_name,),
-        )
+    with st.sidebar:
+        with st.expander("add blocks"):
+            new_block_name = st.text_input("name", key="key/new block name")
+            st.button(
+                "add",
+                key="key/add new block",
+                on_click=add_block,
+                args=(new_block_name,),
+            )
 
     block_ids = get_block_ids()
     block_names = [get_block_name(i) for i in block_ids]
