@@ -154,38 +154,38 @@ def st_block(block_id: int) -> state.BlockBalance:
 
     st_meta, st_buildings = st.columns([1, 2])
     with st_meta:
-        with (
-            st.expander("edit"),
-            st.container(border=False, horizontal=True, vertical_alignment="bottom"),
-        ):
-            st.text_input("name", key=get_block_name_key(block_id))
-            st.button(
-                "delete",
-                key=f"key/blocks/{block_id}/delete",
-                on_click=remove_block,
-                args=(block_id,),
-            )
-
-        with st.container(border=True):
+        with st.expander("config"):
+            with st.container(
+                border=False, horizontal=True, vertical_alignment="bottom"
+            ):
+                st.text_input("name", key=get_block_name_key(block_id))
+                st.button(
+                    "delete",
+                    key=f"key/blocks/{block_id}/delete",
+                    on_click=remove_block,
+                    args=(block_id,),
+                )
             imports = st.multiselect(
                 "imports",
                 items,
                 key=f"state/blocks/{block_id}/imports",
             )
-            st_imports = st.empty()
-        with st.container(border=True):
             locals = st.multiselect(
                 "locals",
                 buildings,
                 key=f"state/blocks/{block_id}/locals",
             )
-            st_locals = st.empty()
-        with st.container(border=True):
             exports = st.multiselect(
                 "exports",
                 items,
                 key=f"state/blocks/{block_id}/exports",
             )
+
+        with st.container(border=True):
+            st_imports = st.empty()
+        with st.container(border=True):
+            st_locals = st.empty()
+        with st.container(border=True):
             st_exports = st.empty()
 
     building_counts: list[state.BuildingCount] = []
