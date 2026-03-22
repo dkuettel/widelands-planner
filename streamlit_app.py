@@ -77,6 +77,9 @@ def st_building_count(
                 info = st.empty()
                 return state.BuildingCount(count, building), info
 
+            case _ as never:
+                assert False, never
+
 
 def delete_block(block: str):
     blocks = st.session_state.get("state/blocks", []) or ["main"]
@@ -90,10 +93,13 @@ def st_ivec(ivec: state.Ivec):
     for i, ips in ivec.sorted():
         counts = state.building_count_from_ips(i, ips)
         rep = " or ".join(f"{c:.1f} {b.value}" for b, c in counts)
-        st.write(f"{60 * ips:.1f} {i.value}/min = {rep}")
+        if ips > 0:
+            st.write(f"{60 * ips:.1f} {i.value}/min = {rep}")
+        else:
+            st.write(f"**{60 * ips:.1f} {i.value}/min = {rep}**")
 
 
-def st_block(block: str):
+def st_block(block: str) -> state.BlockBalance:
     items = sorted(state.Item, key=lambda i: i.value)
     buildings = sorted(state.get_buildings(), key=lambda b: b.name)
 
@@ -167,6 +173,8 @@ def st_block(block: str):
     with st_exports.container(gap=None):
         st_ivec(balance.exports)
 
+    return balance
+
 
 def main():
     st.set_page_config(page_title="widelands planner", layout="wide")
@@ -182,9 +190,17 @@ def main():
                 st.session_state["state/blocks"] = blocks
                 st.rerun()
 
+    balances: list[state.BlockBalance] = []
     for block, tab in zip(blocks, st.tabs(blocks), strict=True):
         with tab:
-            st_block(block)
+            balances.append(st_block(block))
+
+    balance = state.get_global_balance(balances)
+
+    with st.sidebar:
+        st.subheader("global balance")
+        with st.container(gap=None):
+            st_ivec(balance)
 
 
 if __name__ == "__main__":

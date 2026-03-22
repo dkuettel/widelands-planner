@@ -451,6 +451,12 @@ def get_block_balance(block: Block) -> BlockBalance:
     )
 
 
+def get_global_balance(blocks: list[BlockBalance]) -> Ivec:
+    imports = [b.imports.negate() for b in blocks]
+    exports = [b.exports for b in blocks]
+    return Ivec.from_sum(imports + exports)
+
+
 def building_count_from_ips(item: Item, ips: float) -> list[tuple[Bname, float]]:
     counts: list[tuple[Bname, float]] = []
     for building in get_buildings():
