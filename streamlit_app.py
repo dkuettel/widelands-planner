@@ -1,9 +1,26 @@
 from __future__ import annotations
 
+import json
+from pathlib import Path
+
 import streamlit as st
 from streamlit.delta_generator import DeltaGenerator
 
 from widelands_planner import state
+
+
+def save_state(path: Path):
+    state = {
+        k: v
+        for (k, v) in st.session_state.items()
+        if isinstance(k, str) and k.startswith("state/")
+    }
+    path.write_text(json.dumps(state))
+
+
+def load_state(path: Path):
+    state = json.loads(path.read_text())
+    st.session_state.update(state)
 
 
 def get_block_ids() -> list[int]:
@@ -207,6 +224,11 @@ def main():
     st.set_page_config(page_title="widelands planner", layout="wide")
 
     with st.sidebar:
+        with st.container(horizontal=True):
+            if st.button("save"):
+                save_state(Path("./state.json"))
+            if st.button("load"):
+                load_state(Path("./state.json"))
         with st.expander("add blocks"):
             new_block_name = st.text_input("name", key="key/new block name")
             st.button(
