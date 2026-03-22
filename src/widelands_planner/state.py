@@ -3,11 +3,11 @@ from __future__ import annotations
 import math
 from collections.abc import Iterator
 from dataclasses import dataclass
-from enum import Enum, StrEnum
+from enum import StrEnum
 from typing import Literal
 
 
-class Item(Enum):
+class Item(StrEnum):
     bread = "bread"
     fish = "fish"
     fruit = "fruit"
