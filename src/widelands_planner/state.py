@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import math
+from collections.abc import Iterator
 from dataclasses import dataclass
 from enum import Enum, StrEnum
 from typing import Literal
@@ -110,10 +111,10 @@ class Ivec:
         items = {i for r in rates for i in r.data}
         return cls({i: sum(r[i] for r in rates) for i in items})
 
-    # TODO doesnt make so much sense, have smul(60).round().as_json() done by user?
-    def as_ipm(self) -> dict[str, float]:
-        """in items per minute, rounded, 0s removed"""
-        return {str(i): round(v * 60, 1) for (i, v) in self.data.items() if v != 0}
+    def sorted(self) -> Iterator[tuple[Item, float]]:
+        for k, v in sorted(self.data.items()):
+            if v != 0:
+                yield (k, v)
 
     def as_percentages(self) -> dict[str, float]:
         def f(v: float) -> float:
@@ -177,16 +178,11 @@ class PlainBuilding:
     def makes_ips(self) -> Ivec:
         return self.makes.smul(self.rate)
 
-    def can_fulfill(self, shortages: Ivec) -> None | str:
-        items = {i for i, v in self.makes.data.items() if v > 0}
-        s = {i: shortages[i] for i in items if shortages[i] > 0}
-        if not s:
-            return None
-        m = self.makes_ips()
-        adds = {i: (ips / m[i]) for i, ips in s.items()}
-        add = max(adds.values())
-        who = ", ".join(i.value for i in adds.keys())
-        return f"add {add:.1f} for {who}"
+    def representative_count_from_ips(self, item: Item, ips: float) -> float:
+        m = self.makes[item]
+        if m == 0:
+            return 0
+        return ips / (m * self.rate)
 
 
 # TODO only models two-input ration production, not the slower one-input possibility
@@ -213,11 +209,12 @@ class TavernBuilding:
     def makes_ips(self) -> Ivec:
         return Ivec({self.item: self.rate})
 
-    def can_fulfill(self, shortages: Ivec) -> None | str:
-        s = shortages[self.item]
-        if s == 0:
-            return None
-        return f"add {s / self.rate:.1f} for {self.item.value}"
+    def representative_count_from_ips(self, item: Item, ips: float) -> float:
+        match item:
+            case Item.ration:
+                return ips / self.rate
+            case _:
+                return 0
 
 
 @dataclass(frozen=True)
@@ -237,9 +234,6 @@ class ConfiguredTavernBuilding:
 
     def makes_ips(self) -> Ivec:
         return self.building.makes_ips()
-
-    def can_fulfill(self, shortages: Ivec) -> None | str:
-        return self.building.can_fulfill(shortages)
 
 
 @dataclass(frozen=True)
@@ -267,19 +261,12 @@ class SmokeryBuilding:
             }
         )
 
-    def can_fulfill(self, fish_vs_meat: float, shortages: Ivec) -> None | str:
-        s_fish = fish_vs_meat * shortages[Item.smoked_fish]
-        s_meat = (1 - fish_vs_meat) * shortages[Item.smoked_meat]
-        s = s_fish + s_meat
-        if s == 0:
-            return None
-        who: list[str] = []
-        if s_fish > 0:
-            who.append(Item.smoked_fish.value)
-        if s_meat > 0:
-            who.append(Item.smoked_meat.value)
-        who_str = " and ".join(who)
-        return f"add {s / self.rate:.1f} for {who_str}"
+    def representative_count_from_ips(self, item: Item, ips: float) -> float:
+        match item:
+            case Item.smoked_fish | Item.smoked_meat:
+                return ips / self.rate
+            case _:
+                return 0
 
 
 @dataclass(frozen=True)
@@ -297,9 +284,6 @@ class ConfiguredSmokeryBuilding:
 
     def makes_ips(self) -> Ivec:
         return self.building.makes_ips(self.fish_vs_meat)
-
-    def can_fulfill(self, shortages: Ivec) -> None | str:
-        return self.building.can_fulfill(self.fish_vs_meat, shortages)
 
 
 type Building = PlainBuilding | TavernBuilding | SmokeryBuilding
@@ -468,3 +452,12 @@ def get_block_balance(block: Block) -> BlockBalance:
         local=Ivec(local),
         exports=Ivec(exports),
     )
+
+
+def building_count_from_ips(item: Item, ips: float) -> list[tuple[Bname, float]]:
+    counts: list[tuple[Bname, float]] = []
+    for building in get_buildings():
+        c = building.representative_count_from_ips(item, ips)
+        if c > 0:
+            counts.append((building.name, c))
+    return counts

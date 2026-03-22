@@ -78,70 +78,94 @@ def st_building_count(
                 return state.BuildingCount(count, building), info
 
 
-def st_block(block: str):
-    with st.expander("config"):
-        with st.container(horizontal=True):
-            if st.button("delete block", key=f"input/delete block {block}"):
-                blocks = st.session_state.get("state/blocks", []) or ["main"]
-                blocks.remove(block)
-                blocks = blocks or ["main"]
-                st.session_state["state/blocks"] = blocks
-                st.rerun()
-        kinds = st.pills(
-            "block kind",
-            # TODO this make st.session_state contain the full object, not just the name
-            state.get_block_kinds(),
-            format_func=lambda s: s.name,
-            selection_mode="multi",
-            key=f"state/{block}/building kinds",
-        )
-        kind = state.BlockKind.from_many(kinds)
+def delete_block(block: str):
+    blocks = st.session_state.get("state/blocks", []) or ["main"]
+    blocks.remove(block)
+    blocks = blocks or ["main"]
+    st.session_state["state/blocks"] = blocks
+    st.rerun()
 
-    st_imports, st_info, st_exports = st.columns([1, 2, 1], border=True)
-    st_active = st.container(horizontal=True, horizontal_alignment="left", border=False)
-    st_inactive = st.expander("other buildings").container(
-        horizontal=True, horizontal_alignment="left", border=False
-    )
+
+def st_ivec(ivec: state.Ivec):
+    for i, ips in ivec.sorted():
+        counts = state.building_count_from_ips(i, ips)
+        rep = " or ".join(f"{c:.1f} {b.value}" for b, c in counts)
+        st.write(f"{60 * ips:.1f} {i.value}/min = {rep}")
+
+
+def st_block(block: str):
+    items = sorted(state.Item, key=lambda i: i.value)
+    buildings = sorted(state.get_buildings(), key=lambda b: b.name)
+
+    st_meta, st_buildings = st.columns([1, 2])
+    with st_meta:
+        with (
+            st.expander("block"),
+            st.container(border=False, horizontal=True, vertical_alignment="bottom"),
+        ):
+            # TODO not sure how that works here
+            st.text_input("name", value=block, key=f"key/{block}/name")
+            if st.button("delete", key=f"key/{block}/delete"):
+                delete_block(block)
+
+        with st.container(border=True):
+            imports = st.multiselect(
+                "imports",
+                items,
+                format_func=lambda i: i.value,
+                key=f"state/{block}/imports",
+            )
+            st_imports = st.empty()
+        with st.container(border=True):
+            locals = st.multiselect(
+                "locals",
+                buildings,
+                format_func=lambda i: i.name,
+                key=f"state/{block}/locals",
+            )
+            st_locals = st.empty()
+        with st.container(border=True):
+            exports = st.multiselect(
+                "exports",
+                items,
+                format_func=lambda i: i.value,
+                key=f"state/{block}/exports",
+            )
+            st_exports = st.empty()
 
     building_counts: list[state.BuildingCount] = []
     infos: list[DeltaGenerator] = []
-    buildings = state.get_buildings()
-    buildings = sorted(buildings, key=lambda b: b.name)
-    for building in buildings:
-        if building.name in kind.buildings:
-            with st_active:
+
+    with st_buildings:
+        with (
+            st.expander("local buildings", expanded=True),
+            st.container(horizontal=True),
+        ):
+            for building in locals:
                 b, i = st_building_count(block, building)
-        else:
-            with st_inactive:
-                b, i = st_building_count(block, building)
-        building_counts.append(b)
-        infos.append(i)
+                building_counts.append(b)
+                infos.append(i)
+        with st.expander("more buildings"), st.container(horizontal=True):
+            # TODO this is not quite the right identity, we could have twice the same name but different building
+            local_names = {b.name for b in locals}
+            for building in buildings:
+                if building.name not in local_names:
+                    b, i = st_building_count(block, building)
+                    building_counts.append(b)
+                    infos.append(i)
 
     balance = state.get_block_balance(
-        state.Block(block, kind.imports, building_counts, kind.exports)
+        state.Block(block, set(imports), building_counts, set(exports))
     )
 
-    with st_imports, st.container(gap=None):
-        st.write("**imports**")
-        st.json(balance.imports.as_ipm())
+    with st_imports.container(gap=None):
+        st_ivec(balance.imports)
 
-    with st_info, st.container(gap=None):
-        st.write("**info**")
-        st.json(balance.local.as_ipm())
-        # actions = st.empty()
+    with st_locals.container(gap=None):
+        st_ivec(balance.local)
 
-    with st_exports, st.container(gap=None):
-        st.write("**exports**")
-        st.json(balance.exports.as_ipm())
-
-    # with actions.container(horizontal=False, gap=None):
-    #     for b, i in zip(building_counts, infos, strict=True):
-    #         match b.can_fulfill(shortages):
-    #             case None:
-    #                 i.write("no issues")
-    #             case str(msg):
-    #                 i.write(f":warning: {msg}")
-    #                 st.write(f"**{b.get_name()}**: {msg}")
+    with st_exports.container(gap=None):
+        st_ivec(balance.exports)
 
 
 def main():
