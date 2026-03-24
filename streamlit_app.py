@@ -75,27 +75,15 @@ def st_building_count(
                     label_visibility="collapsed",
                 )
                 info = st.empty()
-                fruit_vs_bread = 1 - st.slider(
-                    label="<- fruit vs bread ->",
-                    min_value=0.0,
-                    value=0.5,
-                    max_value=1.0,
-                    step=0.01,
-                    key=f"state/blocks/{block_id}/buildings/{name}/fruit_vs_bread",
-                )
-                fish_vs_meat = 1 - st.slider(
-                    label="<- fish vs meat ->",
-                    min_value=0.0,
-                    value=0.5,
-                    max_value=1.0,
-                    step=0.01,
-                    key=f"state/blocks/{block_id}/buildings/{name}/fish_vs_meat",
+                takes = set(
+                    st.multiselect(
+                        "takes",
+                        building.get_take_items(),
+                        key=f"state/blocks/{block_id}/buildings/{name}/takes",
+                    )
                 )
                 return state.BuildingCount(
-                    count,
-                    state.ConfiguredTavernBuilding(
-                        building, fruit_vs_bread, fish_vs_meat
-                    ),
+                    count, state.ConfiguredTavernBuilding(building, takes)
                 ), info
 
             case state.SmokeryBuilding():
@@ -107,16 +95,15 @@ def st_building_count(
                     label_visibility="collapsed",
                 )
                 info = st.empty()
-                fish_vs_meat = 1 - st.slider(
-                    label="<- fish vs meat ->",
-                    min_value=0.0,
-                    value=0.5,
-                    max_value=1.0,
-                    step=0.01,
-                    key=f"state/blocks/{block_id}/buildings/{name}/fish_vs_meat",
+                takes = set(
+                    st.multiselect(
+                        "takes",
+                        building.get_take_items(),
+                        key=f"state/blocks/{block_id}/buildings/{name}/takes",
+                    )
                 )
                 return state.BuildingCount(
-                    count, state.ConfiguredSmokeryBuilding(building, fish_vs_meat)
+                    count, state.ConfiguredSmokeryBuilding(building, takes)
                 ), info
 
             case state.PlainBuilding():

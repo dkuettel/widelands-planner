@@ -1,9 +1,10 @@
 from __future__ import annotations
 
 import math
-from collections.abc import Iterator
+from collections.abc import Iterator, Set
 from dataclasses import dataclass
 from enum import StrEnum
+from typing import Literal
 
 
 class Item(StrEnum):
@@ -25,6 +26,7 @@ class Item(StrEnum):
     reed = "reed"
     berry_bush = "berry bush"  # TODO make fruit bush and honey bush? they coincide
     beer = "beer"
+    iron_ore = "iron ore"
 
 
 def get_items() -> list[Item]:
@@ -48,6 +50,8 @@ class Bname(StrEnum):
     berry_farms = "berry farms"
     breweries = "breweries"
     bakeries = "bakeries"
+    iron_mines = "iron mines"
+    furnaces = "furnaces"
 
 
 @dataclass(frozen=True)
@@ -183,22 +187,40 @@ class PlainBuilding:
         return ips / (m * self.rate)
 
 
+def take_ratio(item: Item, takes: Set[Item]) -> float:
+    return len({item} & takes) / len(takes)
+
+
 # TODO only models two-input ration production, not the slower one-input possibility
 @dataclass(frozen=True)
 class TavernBuilding:
     rate: float = 1 / 37
     item: Item = Item.ration
 
-    def takes_ips(self, fruit_vs_bread: float, fish_vs_meat: float) -> Ivec:
-        r = self.rate / 2  # we make two rations from two inputs (one of each type)
-        return Ivec(
-            {
-                Item.fruit: r * fruit_vs_bread,
-                Item.bread: r * (1 - fruit_vs_bread),
-                Item.smoked_fish: r * fish_vs_meat,
-                Item.smoked_meat: r * (1 - fish_vs_meat),
-            }
-        )
+    def get_take_items(
+        self,
+    ) -> set[Literal[Item.fruit, Item.bread, Item.smoked_fish, Item.smoked_meat]]:
+        return {Item.fruit, Item.bread, Item.smoked_fish, Item.smoked_meat}
+
+    def takes_ips(
+        self,
+        takes: set[Literal[Item.fruit, Item.bread, Item.smoked_fish, Item.smoked_meat]],
+    ) -> Ivec:
+        assert len(takes) > 0
+        in1 = {Item.fruit, Item.bread} & takes
+        in2 = {Item.smoked_fish, Item.smoked_meat} & takes
+        if in1 and in2:
+            # with both inputs, we produce 2 for 2 at a faster rate
+            tr = take_ratio
+            return Ivec(
+                {
+                    Item.fruit: self.rate / 2 * tr(Item.fruit, in1),
+                    Item.bread: self.rate / 2 * tr(Item.bread, in1),
+                    Item.smoked_fish: self.rate / 2 * tr(Item.smoked_fish, in2),
+                    Item.smoked_meat: self.rate / 2 * tr(Item.smoked_meat, in2),
+                }
+            )
+        assert False
 
     def makes_ips(self) -> Ivec:
         return Ivec({self.item: self.rate})
@@ -214,15 +236,10 @@ class TavernBuilding:
 @dataclass(frozen=True)
 class ConfiguredTavernBuilding:
     building: TavernBuilding
-    fruit_vs_bread: float
-    fish_vs_meat: float
-
-    def __post_init__(self):
-        assert 0 <= self.fruit_vs_bread <= 1
-        assert 0 <= self.fish_vs_meat <= 1
+    takes: set[Literal[Item.fruit, Item.bread, Item.smoked_fish, Item.smoked_meat]]
 
     def takes_ips(self) -> Ivec:
-        return self.building.takes_ips(self.fruit_vs_bread, self.fish_vs_meat)
+        return self.building.takes_ips(self.takes)
 
     def makes_ips(self) -> Ivec:
         return self.building.makes_ips()
@@ -232,20 +249,29 @@ class ConfiguredTavernBuilding:
 class SmokeryBuilding:
     rate: float = 1 / 27
 
-    def takes_ips(self, fish_vs_meat: float) -> Ivec:
+    def get_take_items(
+        self,
+    ) -> set[Literal[Item.fish, Item.meat]]:
+        return {Item.fish, Item.meat}
+
+    def takes_ips(self, takes: set[Literal[Item.fish, Item.meat]]) -> Ivec:
+        assert len(takes) > 0
+        tr = take_ratio
         return Ivec(
             {
                 Item.log: 0.5 * self.rate,
-                Item.fish: self.rate * fish_vs_meat,
-                Item.meat: self.rate * (1 - fish_vs_meat),
+                Item.fish: self.rate * tr(Item.fish, takes),
+                Item.meat: self.rate * tr(Item.meat, takes),
             }
         )
 
-    def makes_ips(self, fish_vs_meat: float) -> Ivec:
+    def makes_ips(self, takes: set[Literal[Item.fish, Item.meat]]) -> Ivec:
+        assert len(takes) > 0
+        tr = take_ratio
         return Ivec(
             {
-                Item.smoked_fish: self.rate * fish_vs_meat,
-                Item.smoked_meat: self.rate * (1 - fish_vs_meat),
+                Item.smoked_fish: self.rate * tr(Item.fish, takes),
+                Item.smoked_meat: self.rate * tr(Item.meat, takes),
             }
         )
 
@@ -260,16 +286,13 @@ class SmokeryBuilding:
 @dataclass(frozen=True)
 class ConfiguredSmokeryBuilding:
     building: SmokeryBuilding
-    fish_vs_meat: float
-
-    def __post_init__(self):
-        assert 0 <= self.fish_vs_meat <= 1
+    takes: set[Literal[Item.fish, Item.meat]]
 
     def takes_ips(self) -> Ivec:
-        return self.building.takes_ips(self.fish_vs_meat)
+        return self.building.takes_ips(self.takes)
 
     def makes_ips(self) -> Ivec:
-        return self.building.makes_ips(self.fish_vs_meat)
+        return self.building.makes_ips(self.takes)
 
 
 type Building = PlainBuilding | TavernBuilding | SmokeryBuilding
@@ -325,6 +348,11 @@ def get_buildings() -> dict[Bname, Building]:
             rate_from_seconds(2 * 46),
             Ivec({Item.granite: 2}),
         ),
+        Bname.iron_mines: PlainBuilding(
+            Ivec({Item.ration: 1}),
+            rate_from_seconds(69),
+            Ivec({Item.iron_ore: 1}),
+        ),
         Bname.clay_pits: PlainBuilding(
             Ivec({Item.water: 1}),
             rate_from_seconds((55, 73)),
@@ -351,6 +379,11 @@ def get_buildings() -> dict[Bname, Building]:
             rate_from_seconds(44),
             Ivec({Item.bread: 1}),
         ),
+        # TODO hm it doesnt make sense with the timings
+        # 1+1 vs 2 doesnt add up
+        # until we can test it go with the iron only?
+        # allow more than one variation, and only configure mixed or pure, no slider
+        # Bname.furnaces: ...,
     }
     return dict(sorted(buildings.items()))
 
