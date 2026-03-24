@@ -75,11 +75,14 @@ def st_building_count(
                     label_visibility="collapsed",
                 )
                 info = st.empty()
+                items = sorted(building.get_take_items())
                 takes = set(
-                    st.multiselect(
+                    st.pills(
                         "takes",
-                        building.get_take_items(),
-                        building.get_take_items(),
+                        items,
+                        selection_mode="multi",
+                        default=items,
+                        label_visibility="collapsed",
                         key=f"state/blocks/{block_id}/buildings/{name}/takes",
                     )
                 )
@@ -96,11 +99,14 @@ def st_building_count(
                     label_visibility="collapsed",
                 )
                 info = st.empty()
+                items = sorted(building.get_take_items())
                 takes = set(
-                    st.multiselect(
+                    st.pills(
                         "takes",
-                        building.get_take_items(),
-                        building.get_take_items(),
+                        items,
+                        selection_mode="multi",
+                        default=items,
+                        label_visibility="collapsed",
                         key=f"state/blocks/{block_id}/buildings/{name}/takes",
                     )
                 )
