@@ -4,7 +4,6 @@ import math
 from collections.abc import Iterator, Set
 from dataclasses import dataclass
 from enum import StrEnum
-from typing import Literal
 
 
 class Item(StrEnum):
@@ -141,44 +140,61 @@ def take_ratio(item: Item, takes: Set[Item]) -> float:
     return len({item} & takes) / len(takes)
 
 
-# TODO only models two-input ration production, not the slower one-input possibility
+@dataclass(frozen=True)
+class TakeMake:
+    take: Ivec
+    make: Ivec
+
+    @classmethod
+    def from_zeros(cls):
+        return cls(Ivec.from_zeros(), Ivec.from_zeros())
+
+
 @dataclass(frozen=True)
 class TavernBuilding:
-    rate: float = 1 / 37
-    item: Item = Item.ration
-
-    def get_take_items(
-        self,
-    ) -> set[Literal[Item.fruit, Item.bread, Item.smoked_fish, Item.smoked_meat]]:
+    def get_take_items(self) -> set[Item]:
         return {Item.fruit, Item.bread, Item.smoked_fish, Item.smoked_meat}
 
-    def takes_ips(
-        self,
-        takes: set[Literal[Item.fruit, Item.bread, Item.smoked_fish, Item.smoked_meat]],
-    ) -> Ivec:
-        assert len(takes) > 0
+    def get_ips(self, takes: Set[Item]) -> TakeMake:
+        tr = take_ratio
+
         in1 = {Item.fruit, Item.bread} & takes
         in2 = {Item.smoked_fish, Item.smoked_meat} & takes
-        if in1 and in2:
-            # with both inputs, we produce 2 for 2 at a faster rate
-            tr = take_ratio
-            return Ivec(
-                {
-                    Item.fruit: self.rate / 2 * tr(Item.fruit, in1),
-                    Item.bread: self.rate / 2 * tr(Item.bread, in1),
-                    Item.smoked_fish: self.rate / 2 * tr(Item.smoked_fish, in2),
-                    Item.smoked_meat: self.rate / 2 * tr(Item.smoked_meat, in2),
-                }
+        if in1 and in2:  # with both inputs, we produce 2 for 2 at a faster rate
+            r = 1 / 37
+            return TakeMake(
+                Ivec(
+                    {
+                        Item.fruit: r / 2 * tr(Item.fruit, in1),
+                        Item.bread: r / 2 * tr(Item.bread, in1),
+                        Item.smoked_fish: r / 2 * tr(Item.smoked_fish, in2),
+                        Item.smoked_meat: r / 2 * tr(Item.smoked_meat, in2),
+                    }
+                ),
+                Ivec({Item.ration: r}),
             )
-        assert False
 
-    def makes_ips(self) -> Ivec:
-        return Ivec({self.item: self.rate})
+        ins = {Item.fruit, Item.bread, Item.smoked_fish, Item.smoked_meat} & takes
+        if ins:  # with just one input we produce 1 for 1 but slower
+            r = 1 / 55
+            return TakeMake(
+                Ivec({i: (r * tr(i, ins)) for i in ins}),
+                Ivec({Item.ration: r}),
+            )
+
+        return TakeMake.from_zeros()
+
+    def takes_ips(self, takes: Set[Item]) -> Ivec:
+        return self.get_ips(takes).take
+
+    def makes_ips(self, takes: Set[Item]) -> Ivec:
+        return self.get_ips(takes).make
 
     def representative_count_from_ips(self, item: Item, ips: float) -> float:
         match item:
             case Item.ration:
-                return ips / self.rate
+                r = 1 / 37
+                return ips / r
             case _:
                 return 0
 
@@ -186,49 +202,53 @@ class TavernBuilding:
 @dataclass(frozen=True)
 class ConfiguredTavernBuilding:
     building: TavernBuilding
-    takes: set[Literal[Item.fruit, Item.bread, Item.smoked_fish, Item.smoked_meat]]
+    takes: set[Item]
 
     def takes_ips(self) -> Ivec:
         return self.building.takes_ips(self.takes)
 
     def makes_ips(self) -> Ivec:
-        return self.building.makes_ips()
+        return self.building.makes_ips(self.takes)
 
 
 @dataclass(frozen=True)
 class SmokeryBuilding:
-    rate: float = 1 / 27
-
-    def get_take_items(
-        self,
-    ) -> set[Literal[Item.fish, Item.meat]]:
+    def get_take_items(self) -> set[Item]:
         return {Item.fish, Item.meat}
 
-    def takes_ips(self, takes: set[Literal[Item.fish, Item.meat]]) -> Ivec:
-        assert len(takes) > 0
+    def get_ips(self, takes: set[Item]) -> TakeMake:
         tr = take_ratio
-        return Ivec(
-            {
-                Item.log: 0.5 * self.rate,
-                Item.fish: self.rate * tr(Item.fish, takes),
-                Item.meat: self.rate * tr(Item.meat, takes),
-            }
-        )
+        ins = {Item.fish, Item.meat} & takes
+        if ins:
+            r = 1 / 27
+            return TakeMake(
+                Ivec(
+                    {
+                        Item.log: 0.5 * r,
+                        Item.fish: r * tr(Item.fish, takes),
+                        Item.meat: r * tr(Item.meat, takes),
+                    }
+                ),
+                Ivec(
+                    {
+                        Item.smoked_fish: r * tr(Item.fish, takes),
+                        Item.smoked_meat: r * tr(Item.meat, takes),
+                    }
+                ),
+            )
+        return TakeMake.from_zeros()
 
-    def makes_ips(self, takes: set[Literal[Item.fish, Item.meat]]) -> Ivec:
-        assert len(takes) > 0
-        tr = take_ratio
-        return Ivec(
-            {
-                Item.smoked_fish: self.rate * tr(Item.fish, takes),
-                Item.smoked_meat: self.rate * tr(Item.meat, takes),
-            }
-        )
+    def takes_ips(self, takes: set[Item]) -> Ivec:
+        return self.get_ips(takes).take
+
+    def makes_ips(self, takes: set[Item]) -> Ivec:
+        return self.get_ips(takes).make
 
     def representative_count_from_ips(self, item: Item, ips: float) -> float:
         match item:
             case Item.smoked_fish | Item.smoked_meat:
-                return ips / self.rate
+                r = 1 / 27
+                return ips / r
             case _:
                 return 0
 
@@ -236,7 +256,7 @@ class SmokeryBuilding:
 @dataclass(frozen=True)
 class ConfiguredSmokeryBuilding:
     building: SmokeryBuilding
-    takes: set[Literal[Item.fish, Item.meat]]
+    takes: set[Item]
 
     def takes_ips(self) -> Ivec:
         return self.building.takes_ips(self.takes)

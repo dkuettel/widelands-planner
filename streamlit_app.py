@@ -79,6 +79,7 @@ def st_building_count(
                     st.multiselect(
                         "takes",
                         building.get_take_items(),
+                        building.get_take_items(),
                         key=f"state/blocks/{block_id}/buildings/{name}/takes",
                     )
                 )
@@ -98,6 +99,7 @@ def st_building_count(
                 takes = set(
                     st.multiselect(
                         "takes",
+                        building.get_take_items(),
                         building.get_take_items(),
                         key=f"state/blocks/{block_id}/buildings/{name}/takes",
                     )
