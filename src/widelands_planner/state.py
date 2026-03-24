@@ -55,56 +55,6 @@ class Bname(StrEnum):
 
 
 @dataclass(frozen=True)
-class BlockKind:
-    name: str
-    imports: set[Item]
-    buildings: set[Bname]
-    exports: set[Item]
-
-    @classmethod
-    def from_many(cls, kinds: list[BlockKind]):
-        return cls(
-            name=",".join(sorted(k.name for k in kinds)),
-            imports={i for k in kinds for i in k.imports},
-            buildings={b for k in kinds for b in k.buildings},
-            exports={i for k in kinds for i in k.exports},
-        )
-
-
-def get_block_kinds() -> list[BlockKind]:
-    return [
-        BlockKind(
-            name="materials",
-            imports=set(),
-            buildings={
-                Bname.wells,
-                Bname.reed_farms,
-                Bname.clay_pits,
-                Bname.brick_kilns,
-                Bname.foresters_houses,
-                Bname.woodcutters_houses,
-            },
-            exports={Item.brick, Item.clay, Item.reed, Item.log},
-        ),
-        BlockKind(
-            name="rations",
-            imports={Item.log},
-            buildings={
-                Bname.taverns,
-                Bname.smokeries,
-                Bname.fishers_houses,
-                Bname.wells,
-                Bname.farms,
-                Bname.fruit_collectors_houses,
-                Bname.berry_farms,
-                Bname.bakeries,
-            },
-            exports={Item.ration},
-        ),
-    ]
-
-
-@dataclass(frozen=True)
 class Ivec:
     # TODO can we protect this dict from changes to be safe?
     data: dict[Item, float]
