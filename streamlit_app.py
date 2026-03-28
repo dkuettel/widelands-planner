@@ -1,7 +1,14 @@
 from __future__ import annotations
 
+import inspect
 import json
+import typing
+from collections.abc import Callable, Iterator
+from dataclasses import asdict, dataclass
+from functools import partial
 from pathlib import Path
+from typing import Annotated, Any, ParamSpec, Protocol, final, override
+from uuid import uuid4
 
 import streamlit as st
 from streamlit.delta_generator import DeltaGenerator
@@ -60,18 +67,258 @@ def remove_block(block_id: int):
     st.session_state["state/block_ids"] = block_ids
 
 
+class Key:
+    def __init__(self, at: tuple[str, ...] = ()):
+        self.__at = at
+
+    def __getitem__(self, name: str) -> Key:
+        return Key((*self.__at, name))
+
+    def __getattr__(self, name: str) -> Key:
+        return self[name]
+
+    @override
+    def __str__(self) -> str:
+        return ".".join(self.__at)
+
+
+def save(key: Key, value: int | str | float | list[str]):
+    st.session_state[str(key)] = value
+
+
+def load[T](key: Key, ty: type[T], default: T) -> T:
+    value = st.session_state.get(str(key), default)
+    # TODO check type
+    return value
+
+
+@dataclass(frozen=True)
+class UuidListState:
+    key: str
+
+    def get(self) -> list[str]:
+        return st.session_state.setdefault(self.key, [])
+
+
+@dataclass(frozen=True)
+class BuildingState:
+    pass
+
+
+rs = Key().state
+
+
+@dataclass(frozen=True)
+class BlockState:
+    id: str
+
+    def key(self) -> Key:
+        return rs.blocks[self.id]
+
+    def save(self):
+        pass
+
+    def st_name(self):
+        fn = partial(st.text_input, key=str(rs.block[self.id].name))
+        return fn
+
+
+def set_default(key: Key | str, value: str | int):
+    st.session_state.setdefault(str(key), value)
+
+
+def set_value(key: Key | str, value: str | int):
+    st.session_state[str(key)] = value
+
+
+def get_str(key: Key | str) -> str:
+    # TODO check type
+    return st.session_state.get(str(key), "")
+
+
+def get_int(key: Key | str) -> int:
+    # TODO check type
+    return st.session_state.get(str(key), 0)
+
+
+def get_str_list(key: Key | str) -> list[str]:
+    return st.session_state.get(str(key), [])
+
+
+def append_str_list(key: Key | str, item: str):
+    items = st.session_state.get(str(key), [])
+    items.append(item)
+    st.session_state[str(key)] = items
+
+
+def remove_str_list(key: Key | str, item: str):
+    # TODO not sure if we need to read and write
+    items = st.session_state.get(str(key), [])
+    items.remove(item)
+    st.session_state[str(key)] = items
+
+
+@final
+class StrState:
+    def __init__(self, key: Key, value: str):
+        set_default(key, value)
+        self.key = str(key)
+
+    @property
+    def value(self) -> str:
+        return get_str(self.key)
+
+    @property
+    def text_input(self):
+        return partial(st.text_input, key=self.key)
+
+
+@final
+class ButtonState:
+    def __init__(self, key: Key):
+        self.key = str(key)
+
+    @property
+    def button(self):
+        return partial(st.button, key=self.key)
+
+
+@final
+class IntState:
+    def __init__(self, key: Key, value: int):
+        set_default(key, value)
+        self.key = str(key)
+
+    @property
+    def value(self) -> int:
+        return get_int(self.key)
+
+    @property
+    def number_input(self):
+        return partial(st.number_input, key=self.key)
+
+
+class IdDictValue(Protocol):
+    def __init__(self, key: Key):
+        pass
+
+
+@final
+class IdDict[V: IdDictValue]:
+    def __init__(self, key: Key, ty: type[V]):
+        self.key = key
+        self.ty = ty
+
+    def __getitem__(self, key: str) -> V:
+        return self.ty(self.key.values[key])
+
+    def items(self) -> Iterator[tuple[str, V]]:
+        for key in get_str_list(self.key.keys):
+            yield (key, self[key])
+
+    def add(self) -> str:
+        key = uuid4().hex
+        append_str_list(self.key.keys, key)
+        return key
+
+    def fn_add(self):
+        def fn():
+            self.add()
+
+        return fn
+
+    def remove(self, key: str):
+        # TODO also clean up data in .values?
+        remove_str_list(self.key.keys, key)
+
+    def fn_remove(self, key: str):
+        def fn():
+            self.remove(key)
+
+        return fn
+
+
+@final
+class BState:
+    def __init__(self, key: Key):
+        self.key = key
+        self.name = StrState(key.name, "unnamed")
+        self.count = IntState(key.count, 0)
+        self.remove = ButtonState(key.remove)
+
+
+@final
+class OState:
+    def __init__(self, key: Key):
+        self.name = StrState(key.name, "unnamed")
+        self.count = IntState(key.count, 0)
+        self.buildings = IdDict(key.buildings, BState)
+        self.add = ButtonState(key.add)
+
+
+@dataclass(frozen=True)
+class State:
+    blocks: dict[str, BlockState]
+
+    @classmethod
+    def from_session(cls):
+        ids = load(rs.block_uuids, list[str], [])
+        return cls({id: BlockState.from_session(id) for id in ids})
+
+    def save(self):
+        key = Key().state
+        save(key.block_uuids, list(self.blocks))
+        for block in self.blocks.values():
+            block.save()
+
+    def call[**P](self, fn: Callable[P, None]):
+        def partial(*args: P.args, **kwargs: P.kwargs):
+            def baked():
+                fn(*args, **kwargs)
+                self.save()
+
+            return baked
+
+        return partial
+
+    def add_block(self, name: str):
+        id = uuid4().hex
+        load(rs.block_uuids, list[str], []).append(id)
+        self.blocks[id] = BlockState(id, name)
+
+    def remove_block(self, id: str):
+        load(rs.block_uuids, list[str], []).remove(id)
+        del self.blocks[id]
+
+
 def st_building_count(
-    block_id: int, name: str, building: state.Building
+    block_id: int, name: str, variation: str, building: state.Building
 ) -> tuple[state.BuildingCount, DeltaGenerator]:
     with st.container(border=True, width=200):
-        st.write(f"**{name}**")
+        st.write(f"**{name}** {variation}")
+        if st.button(
+            "add",
+            key=f"key/blocks/{block_id}/buildings/{name}/variations/{variation}/add",
+        ):
+            st.session_state.setdefault(
+                f"state/blocks/{block_id}/buildings/{name}/variation_ids", ["default"]
+            ).append(uuid4())
+            st.rerun()
+        if st.button(
+            "rm",
+            key=f"key/blocks/{block_id}/buildings/{name}/variations/{variation}/rm",
+        ):
+            st.session_state.setdefault(
+                f"state/blocks/{block_id}/buildings/{name}/variation_ids", ["default"]
+            ).remove(variation)
+            st.rerun()
         match building:
             case state.TavernBuilding():
                 count = st.number_input(
                     "count",
                     min_value=0,
                     value=0,
-                    key=f"state/blocks/{block_id}/buildings/{name}/count",
+                    key=f"state/blocks/{block_id}/buildings/{name}/variations/{variation}/count",
                     label_visibility="collapsed",
                 )
                 info = st.empty()
@@ -83,7 +330,7 @@ def st_building_count(
                         selection_mode="multi",
                         default=items,
                         label_visibility="collapsed",
-                        key=f"state/blocks/{block_id}/buildings/{name}/takes",
+                        key=f"state/blocks/{block_id}/buildings/{name}/variations/{variation}/takes",
                     )
                 )
                 return state.BuildingCount(
@@ -95,7 +342,7 @@ def st_building_count(
                     name,
                     min_value=0,
                     value=0,
-                    key=f"state/blocks/{block_id}/buildings/{name}/count",
+                    key=f"state/blocks/{block_id}/buildings/{name}/variations/{variation}/count",
                     label_visibility="collapsed",
                 )
                 info = st.empty()
@@ -107,7 +354,7 @@ def st_building_count(
                         selection_mode="multi",
                         default=items,
                         label_visibility="collapsed",
-                        key=f"state/blocks/{block_id}/buildings/{name}/takes",
+                        key=f"state/blocks/{block_id}/buildings/{name}/variations/{variation}/takes",
                     )
                 )
                 return state.BuildingCount(
@@ -119,7 +366,7 @@ def st_building_count(
                     name,
                     min_value=0,
                     value=0,
-                    key=f"state/blocks/{block_id}/buildings/{name}/count",
+                    key=f"state/blocks/{block_id}/buildings/{name}/variations/{variation}/count",
                     label_visibility="collapsed",
                 )
                 info = st.empty()
@@ -165,15 +412,26 @@ def st_block(block_id: int) -> state.BlockBalance:
                 items,
                 key=f"state/blocks/{block_id}/imports",
             )
-            locals = st.multiselect(
+            local_bnames: list[state.Bname] = st.multiselect(
                 "locals",
                 buildings,
                 key=f"state/blocks/{block_id}/locals",
             )
+            locals: list[tuple[state.Bname, str]] = [
+                (b, v)
+                for b in sorted(local_bnames)
+                for v in st.session_state.setdefault(
+                    f"state/blocks/{block_id}/buildings/{b.value}/variation_ids",
+                    ["default"],
+                )
+                or ["default"]
+            ]
             exports = st.multiselect(
                 "exports",
                 items,
                 key=f"state/blocks/{block_id}/exports",
+                # TODO that actually kinda works, looks ugly, but still, just save a bookmark
+                bind="query-params",
             )
 
         with st.container(border=True):
@@ -191,15 +449,15 @@ def st_block(block_id: int) -> state.BlockBalance:
             st.expander("local buildings", expanded=True),
             st.container(horizontal=True),
         ):
-            for name in locals:
-                b, i = st_building_count(block_id, name, buildings[name])
+            for name, variation in locals:
+                b, i = st_building_count(block_id, name, variation, buildings[name])
                 building_counts.append(b)
                 infos.append(i)
-        with st.expander("more buildings"), st.container(horizontal=True):
-            for name in sorted(set(buildings) - set(locals)):
-                b, i = st_building_count(block_id, name, buildings[name])
-                building_counts.append(b)
-                infos.append(i)
+        # with st.expander("more buildings"), st.container(horizontal=True):
+        #     for name in sorted(set(buildings) - set(locals)):
+        #         b, i = st_building_count(block_id, name, buildings[name])
+        #         building_counts.append(b)
+        #         infos.append(i)
 
     balance = state.get_block_balance(
         state.Block(set(imports), building_counts, set(exports))
@@ -219,6 +477,35 @@ def st_block(block_id: int) -> state.BlockBalance:
 
 def main():
     st.set_page_config(page_title="widelands planner", layout="wide")
+
+    s = OState(Key().state)
+    s.name.text_input("name")
+    for key, building in s.buildings.items():
+        with st.container(border=True):
+            st.write(key)
+            building.name.text_input("name")
+            building.count.number_input("count")
+            # NOTE if-constructs make keys disappear
+            building.remove.button("remove", on_click=s.buildings.fn_remove(key))
+    st.button("add", on_click=s.buildings.fn_add())
+
+    return
+
+    a = State.from_session()
+    st.write(asdict(a))
+    with st.container(horizontal=True):
+        for uuid, block in a.blocks.items():
+            with st.container(width=200):
+                st.write(block.name)
+                block.st_name()("name")
+                st.write(uuid)
+                st.button(
+                    "remove",
+                    key=f"{uuid}/remove",
+                    on_click=a.call(a.remove_block)(uuid),
+                )
+
+    st.button("add", key="add", on_click=a.call(a.add_block)("new"))
 
     with st.sidebar:
         with st.container(horizontal=True):
