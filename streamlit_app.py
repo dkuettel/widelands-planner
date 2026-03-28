@@ -5,6 +5,7 @@ import json
 import typing
 from collections.abc import Callable, Iterator
 from dataclasses import asdict, dataclass
+from enum import StrEnum
 from functools import partial
 from pathlib import Path
 from typing import Annotated, Any, ParamSpec, Protocol, final, override
@@ -180,6 +181,7 @@ class ButtonState:
 
     @property
     def button(self):
+        # NOTE if-constructs make keys disappear, its better to use on_click
         return partial(st.button, key=self.key)
 
 
@@ -196,6 +198,23 @@ class IntState:
     @property
     def number_input(self):
         return partial(st.number_input, key=self.key)
+
+
+@final
+class EnumState[E: StrEnum]:
+    def __init__(self, key: Key, ty: type[E], default: E):
+        self.ty = ty
+        self.key = str(key)
+        st.session_state.setdefault(self.key, default)
+
+    @property
+    def value(self) -> E:
+        # TODO typing?
+        return st.session_state[self.key]
+
+    @property
+    def selectbox(self):
+        return partial(st.selectbox, options=list(self.ty), key=self.key)
 
 
 class IdDictValue(Protocol):
@@ -237,6 +256,17 @@ class IdDict[V: IdDictValue]:
 
         return fn
 
+    @property
+    def add_button(self):
+        return partial(st.button, key=str(self.key.add_button), on_click=self.fn_add())
+
+    def remove_button(self, key: str):
+        return partial(
+            st.button,
+            key=str(self.key.remove_button[key]),
+            on_click=self.fn_remove(key),
+        )
+
 
 @final
 class BState:
@@ -248,12 +278,27 @@ class BState:
 
 
 @final
+class BuildingState:
+    def __init__(self, key: Key):
+        self.count = IntState(key.count, 0)
+        self.name = EnumState(key.name, state.Bname, state.Bname.fishers_houses)
+
+
+@final
+class BlockState:
+    def __init__(self, key: Key):
+        self.name = StrState(key.name, "unnamed block")
+        self.buildings = IdDict(key.buildings, BuildingState)
+
+
+@final
 class OState:
     def __init__(self, key: Key):
         self.name = StrState(key.name, "unnamed")
         self.count = IntState(key.count, 0)
         self.buildings = IdDict(key.buildings, BState)
         self.add = ButtonState(key.add)
+        self.blocks = IdDict(key.blocks, BlockState)
 
 
 @dataclass(frozen=True)
@@ -479,15 +524,22 @@ def main():
     st.set_page_config(page_title="widelands planner", layout="wide")
 
     s = OState(Key().state)
-    s.name.text_input("name")
-    for key, building in s.buildings.items():
-        with st.container(border=True):
-            st.write(key)
-            building.name.text_input("name")
-            building.count.number_input("count")
-            # NOTE if-constructs make keys disappear
-            building.remove.button("remove", on_click=s.buildings.fn_remove(key))
-    st.button("add", on_click=s.buildings.fn_add())
+    s.blocks.add_button("add block")
+    tab_names = [block.name.value for _, block in s.blocks.items()]
+    if len(tab_names) > 0:
+        tabs = st.tabs(tab_names)
+        for tab, (key, block) in zip(tabs, s.blocks.items(), strict=True):
+            with tab:
+                with st.container(horizontal=True, vertical_alignment="bottom"):
+                    block.name.text_input("name")
+                    s.blocks.remove_button(key)("remove block")
+                with st.container(horizontal=True):
+                    for key, building in block.buildings.items():
+                        with st.container(border=True, width=300):
+                            building.name.selectbox("name")
+                            building.count.number_input("count", min_value=0)
+                            block.buildings.remove_button(key)("remove")
+                    block.buildings.add_button("add building")
 
     return
 
