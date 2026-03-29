@@ -41,6 +41,11 @@ class IntState:
 class ButtonState:
     key: str
 
+    @classmethod
+    def from_key(cls, key: str):
+        # NOTE buttons cant be tracked as state, it will refuse to load
+        return cls(f"button.{key}")
+
 
 @dataclass(frozen=True)
 class EnumState[T: StrEnum]:
@@ -76,7 +81,7 @@ class CountState:
             parent=parent,
             id=id,
             count=IntState(f"{key}.count", 0),
-            remove=ButtonState(f"{key}.remove"),
+            remove=ButtonState.from_key(f"{key}.remove"),
             bname=EnumState(f"{key}.bname", state.Bname, state.Bname.fishers_houses),
             takes=SetState(f"{key}.takes", state.Item),
         )
@@ -103,7 +108,7 @@ class BlockCountState:
         return cls(
             key=key,
             ids=StrListState(f"{key}.ids"),
-            add=ButtonState(f"{key}.add"),
+            add=ButtonState.from_key(f"{key}.add"),
         )
 
     def add_fn(self):
@@ -126,7 +131,7 @@ class BlockState:
             parent=parent,
             id=id,
             name=StrState(f"{key}.name", "unnamed block"),
-            remove=ButtonState(f"{key}.remove"),
+            remove=ButtonState.from_key(f"{key}.remove"),
             counts=BlockCountState.from_key(key),
             imports=SetState(f"{key}.imports", state.Item),
             exports=SetState(f"{key}.exports", state.Item),
@@ -169,7 +174,7 @@ class BlocksState:
         return cls(
             key=key,
             ids=StrListState(f"{key}.ids"),
-            add=ButtonState(f"{key}.add"),
+            add=ButtonState.from_key(f"{key}.add"),
         )
 
 
@@ -182,16 +187,17 @@ class SessionState:
         return cls(BlocksState.from_key(f"{key}.blocks"))
 
 
-def save_state(path: Path):
+def save_state(path: Path = Path("./state.json")):
     state = {
         k: v
         for (k, v) in st.session_state.items()
         if isinstance(k, str) and k.startswith("state.")
     }
-    path.write_text(json.dumps(state))
+    state = dict(sorted(state.items()))
+    path.write_text(json.dumps(state, indent="  "))
 
 
-def load_state(path: Path):
+def load_state(path: Path = Path("./state.json")):
     state = json.loads(path.read_text())
     st.session_state.update(state)
 
@@ -359,11 +365,8 @@ def main():
         st.button("add block", on_click=add_block)
         st.divider()
         with st.container(horizontal=True):
-            if st.button("save"):
-                # TODO do those still work?
-                save_state(Path("./state.json"))
-            if st.button("load"):
-                load_state(Path("./state.json"))
+            st.button("save", on_click=save_state)
+            st.button("load", on_click=load_state)
 
     block_names = [block.name.get() for block in ss.blocks]
     if len(block_names) == 0:
