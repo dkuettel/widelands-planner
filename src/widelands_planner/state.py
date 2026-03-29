@@ -26,6 +26,7 @@ class Item(StrEnum):
     berry_bush = "berry bush"  # TODO make fruit bush and honey bush? they coincide
     beer = "beer"
     iron_ore = "iron ore"
+    iron = "iron"
 
 
 def get_items() -> list[Item]:
@@ -265,9 +266,63 @@ class ConfiguredSmokeryBuilding:
         return self.building.makes_ips(self.takes)
 
 
-type Building = PlainBuilding | TavernBuilding | SmokeryBuilding
+@dataclass(frozen=True)
+class FurnaceBuilding:
+    def get_take_items(self) -> set[Item]:
+        return {Item.iron_ore}  # TODO gold_ore soon
+
+    def get_ips(self, takes: set[Item]) -> TakeMake:
+        ins = {Item.iron_ore} & takes
+        if ins:
+            r = 1 / 64
+            return TakeMake(
+                Ivec(
+                    {
+                        Item.coal: r,
+                        Item.iron_ore: r,
+                    }
+                ),
+                Ivec(
+                    {
+                        Item.iron: r,
+                    }
+                ),
+            )
+        return TakeMake.from_zeros()
+
+    def takes_ips(self, takes: set[Item]) -> Ivec:
+        return self.get_ips(takes).take
+
+    def makes_ips(self, takes: set[Item]) -> Ivec:
+        return self.get_ips(takes).make
+
+    def representative_count_from_ips(self, item: Item, ips: float) -> float:
+        match item:
+            case Item.iron:
+                r = 1 / 64
+                return ips / r
+            case _:
+                return 0
+
+
+@dataclass(frozen=True)
+class ConfiguredFurnaceBuilding:
+    building: FurnaceBuilding
+    takes: set[Item]
+
+    def takes_ips(self) -> Ivec:
+        return self.building.takes_ips(self.takes)
+
+    def makes_ips(self) -> Ivec:
+        return self.building.makes_ips(self.takes)
+
+
+type Building = PlainBuilding | TavernBuilding | SmokeryBuilding | FurnaceBuilding
 type ConfiguredBuilding = (
-    PlainBuilding | ConfiguredTavernBuilding | ConfiguredSmokeryBuilding
+    PlainBuilding
+    | ConfiguredTavernBuilding
+    | ConfiguredSmokeryBuilding
+    | ConfiguredFurnaceBuilding
 )
 
 
@@ -349,12 +404,9 @@ def get_buildings() -> dict[Bname, Building]:
             rate_from_seconds(44),
             Ivec({Item.bread: 1}),
         ),
-        # TODO hm it doesnt make sense with the timings
-        # 1+1 vs 2 doesnt add up
-        # until we can test it go with the iron only?
-        # allow more than one variation, and only configure mixed or pure, no slider
-        # Bname.furnaces: ...,
+        Bname.furnaces: FurnaceBuilding(),
     }
+    assert set(buildings) == set(Bname), set(Bname) - set(buildings)
     return dict(sorted(buildings.items()))
 
 

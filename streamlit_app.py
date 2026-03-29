@@ -344,8 +344,15 @@ def get_state_block_count(
             return state.BuildingCount(
                 count, state.ConfiguredSmokeryBuilding(building, takes)
             )
+        case state.FurnaceBuilding():
+            takes = count_state.takes.get(building.get_take_items())
+            return state.BuildingCount(
+                count, state.ConfiguredFurnaceBuilding(building, takes)
+            )
         case state.PlainBuilding():
             return state.BuildingCount(count, building)
+        case _ as never:  # pyright: ignore[reportUnnecessaryComparison]
+            assert False, never  # pyright: ignore[reportUnreachable]
 
 
 def main():
@@ -415,14 +422,20 @@ def main():
                                 min_value=0,
                             )
                             match building:
-                                case state.TavernBuilding() | state.SmokeryBuilding():
+                                case (
+                                    state.TavernBuilding()
+                                    | state.SmokeryBuilding()
+                                    | state.FurnaceBuilding()
+                                ):
                                     st.multiselect(
                                         "takes",
                                         sorted(building.get_take_items()),
                                         key=count_state.takes.key,
                                     )
-                                case _:
+                                case state.PlainBuilding():
                                     pass
+                                case _ as never:  # pyright: ignore[reportUnnecessaryComparison]
+                                    assert False, never  # pyright: ignore[reportUnreachable]
                             st.button(
                                 "remove",
                                 key=count_state.remove.key,
