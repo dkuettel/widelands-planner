@@ -102,7 +102,7 @@ class UuidListState:
 
 
 @dataclass(frozen=True)
-class BuildingState:
+class BuildingCountState:
     pass
 
 
@@ -269,71 +269,31 @@ class IdDict[V: IdDictValue]:
 
 
 @final
-class BState:
-    def __init__(self, key: Key):
-        self.key = key
-        self.name = StrState(key.name, "unnamed")
-        self.count = IntState(key.count, 0)
-        self.remove = ButtonState(key.remove)
+class PlainBuildingState:
+    pass
 
 
 @final
-class BuildingState:
+class BuildingCountState:
     def __init__(self, key: Key):
         self.count = IntState(key.count, 0)
-        self.name = EnumState(key.name, state.Bname, state.Bname.fishers_houses)
+        # TODO how to manage here the Smokery and co configs vs plain?
+        # manually we would look at Bname first, and depending on this instantiate something different
+        self.building: PlainBuildingState = PlainBuildingState(key.building)
 
 
 @final
 class BlockState:
     def __init__(self, key: Key):
         self.name = StrState(key.name, "unnamed block")
-        self.buildings = IdDict(key.buildings, BuildingState)
+        self.counts = IdDict(key.buildings, BuildingCountState)
 
 
 @final
 class OState:
     def __init__(self, key: Key):
-        self.name = StrState(key.name, "unnamed")
-        self.count = IntState(key.count, 0)
-        self.buildings = IdDict(key.buildings, BState)
         self.add = ButtonState(key.add)
         self.blocks = IdDict(key.blocks, BlockState)
-
-
-@dataclass(frozen=True)
-class State:
-    blocks: dict[str, BlockState]
-
-    @classmethod
-    def from_session(cls):
-        ids = load(rs.block_uuids, list[str], [])
-        return cls({id: BlockState.from_session(id) for id in ids})
-
-    def save(self):
-        key = Key().state
-        save(key.block_uuids, list(self.blocks))
-        for block in self.blocks.values():
-            block.save()
-
-    def call[**P](self, fn: Callable[P, None]):
-        def partial(*args: P.args, **kwargs: P.kwargs):
-            def baked():
-                fn(*args, **kwargs)
-                self.save()
-
-            return baked
-
-        return partial
-
-    def add_block(self, name: str):
-        id = uuid4().hex
-        load(rs.block_uuids, list[str], []).append(id)
-        self.blocks[id] = BlockState(id, name)
-
-    def remove_block(self, id: str):
-        load(rs.block_uuids, list[str], []).remove(id)
-        del self.blocks[id]
 
 
 def st_building_count(
@@ -520,74 +480,266 @@ def st_block(block_id: int) -> state.BlockBalance:
     return balance
 
 
+@dataclass(frozen=True)
+class BuildingCount:
+    count: int
+
+
+@dataclass(frozen=True)
+class Block:
+    id: str
+    name: str
+    counts: list[BuildingCount]
+
+    @classmethod
+    def from_session(cls, id: str, key: Key):
+        ids: list[str] = st.session_state.setdefault(str(key.counts.ids), [])
+        return cls(
+            id=id,
+            name=st.session_state.setdefault(str(key.name), "unnamed block"),
+            counts=[BuildingCount.from_session],
+        )
+
+
+def get_blocks() -> list[Block]:
+    key = Key().stat.blocks
+    ids = st.session_state.setdefault(str(key.ids), [])
+    return [Block.from_session(id, key.values[id]) for id in ids]
+
+
+kstate = Key().state
+
+
+def get[T](key: Key, ty: type[T], default: T) -> T:
+    value = st.session_state.setdefault(str(key), default)
+    # TODO check type better
+    # assert isinstance(value, ty)
+    return value
+
+
+def get_block_ids() -> list[str]:
+    return get(kstate.blocks.ids, list[str], [])
+
+
+def add_block():
+    id = uuid4().hex
+    get(kstate.blocks.ids, list[str], []).append(id)
+
+
+def remove_block(id: str):
+    get(kstate.blocks.ids, list[str], []).remove(id)
+
+
+def get_count_ids(block_id: str) -> list[str]:
+    return get(kstate.blocks.items[block_id].counts.ids, list[str], [])
+
+
+def get_count(block_id: str, count_id: str) -> int:
+    # TODO so i guess we could just make Key so that it only has valid keys? if we want it documented?
+    return get(kstate.blocks.items[block_id].counts.items[count_id].count, int, 0)
+
+
+def add_count(block_id: str):
+    id = uuid4().hex
+    get(kstate.blocks.items[block_id].counts.ids, list[str], []).append(id)
+
+
+def remove_count(block_id: str, count_id: str):
+    get(kstate.blocks.items[block_id].counts.ids, list[str], []).remove(count_id)
+
+
+def get_bname(block_id: str, count_id: str) -> state.Bname:
+    # TODO does this return str or a Bname?
+    return get(
+        kstate.blocks.items[block_id].counts.items[count_id].bname,
+        state.Bname,
+        state.Bname.fishers_houses,
+    )
+
+
+def get_takes(
+    block_id: str, count_id: str, default: set[state.Item]
+) -> set[state.Item]:
+    return set(
+        get(
+            kstate.blocks.items[block_id].counts.items[count_id].takes,
+            list[state.Item],
+            list(default),
+        )
+    )
+
+
+def get_imports(block_id: str) -> set[state.Item]:
+    return set(
+        get(
+            kstate.blocks.items[block_id].imports,
+            list[state.Item],
+            list(),
+        )
+    )
+
+
+def get_exports(block_id: str) -> set[state.Item]:
+    return set(
+        get(
+            kstate.blocks.items[block_id].exports,
+            list[state.Item],
+            list(),
+        )
+    )
+
+
+def get_state(
+    buildings: dict[state.Bname, state.Building],
+) -> tuple[list[state.BlockBalance], state.Ivec]:
+    balances = [get_state_block(buildings, block_id) for block_id in get_block_ids()]
+    balance = state.get_global_balance(balances)
+    return balances, balance
+
+
+def get_state_block(
+    buildings: dict[state.Bname, state.Building], block_id: str
+) -> state.BlockBalance:
+    imports = get_imports(block_id)
+    counts = [
+        get_state_block_count(buildings, block_id, count_id)
+        for count_id in get_count_ids(block_id)
+    ]
+    exports = get_exports(block_id)
+    balance = state.get_block_balance(state.Block(imports, counts, exports))
+    return balance
+
+
+def get_state_block_count(
+    buildings: dict[state.Bname, state.Building], block_id: str, count_id: str
+) -> state.BuildingCount:
+    count = get_count(block_id, count_id)
+    bname = get_bname(block_id, count_id)
+    building = buildings[bname]
+    match building:
+        case state.TavernBuilding():
+            takes = get_takes(block_id, count_id, building.get_take_items())
+            return state.BuildingCount(
+                count, state.ConfiguredTavernBuilding(building, takes)
+            )
+        case state.SmokeryBuilding():
+            takes = get_takes(block_id, count_id, building.get_take_items())
+            return state.BuildingCount(
+                count, state.ConfiguredSmokeryBuilding(building, takes)
+            )
+        case state.PlainBuilding():
+            return state.BuildingCount(count, building)
+
+
 def main():
     st.set_page_config(page_title="widelands planner", layout="wide")
 
-    s = OState(Key().state)
-    s.blocks.add_button("add block")
-    tab_names = [block.name.value for _, block in s.blocks.items()]
-    if len(tab_names) > 0:
-        tabs = st.tabs(tab_names)
-        for tab, (key, block) in zip(tabs, s.blocks.items(), strict=True):
-            with tab:
-                with st.container(horizontal=True, vertical_alignment="bottom"):
-                    block.name.text_input("name")
-                    s.blocks.remove_button(key)("remove block")
-                with st.container(horizontal=True):
-                    for key, building in block.buildings.items():
-                        with st.container(border=True, width=300):
-                            building.name.selectbox("name")
-                            building.count.number_input("count", min_value=0)
-                            block.buildings.remove_button(key)("remove")
-                    block.buildings.add_button("add building")
-
-    return
-
-    a = State.from_session()
-    st.write(asdict(a))
-    with st.container(horizontal=True):
-        for uuid, block in a.blocks.items():
-            with st.container(width=200):
-                st.write(block.name)
-                block.st_name()("name")
-                st.write(uuid)
-                st.button(
-                    "remove",
-                    key=f"{uuid}/remove",
-                    on_click=a.call(a.remove_block)(uuid),
-                )
-
-    st.button("add", key="add", on_click=a.call(a.add_block)("new"))
-
-    with st.sidebar:
-        with st.container(horizontal=True):
-            if st.button("save"):
-                save_state(Path("./state.json"))
-            if st.button("load"):
-                load_state(Path("./state.json"))
-        with st.expander("add blocks"):
-            new_block_name = st.text_input("name", key="key/new block name")
-            st.button(
-                "add",
-                key="key/add new block",
-                on_click=add_block,
-                args=(new_block_name,),
-            )
-
-    block_ids = get_block_ids()
-    block_names = [get_block_name(i) for i in block_ids]
-
-    balances: list[state.BlockBalance] = []
-    for block_id, tab in zip(block_ids, st.tabs(block_names), strict=True):
-        with tab:
-            balances.append(st_block(block_id))
-
-    balance = state.get_global_balance(balances)
+    buildings = state.get_buildings()
+    balances, balance = get_state(buildings)
+    bnames = sorted(state.Bname)
+    items = state.get_items()
 
     with st.sidebar:
         st.subheader("global balance")
         with st.container(gap=None):
             st_ivec(balance)
+        st.divider()
+        st.button("add block", on_click=add_block)
+        st.divider()
+        with st.container(horizontal=True):
+            if st.button("save"):
+                # TODO do those still work?
+                save_state(Path("./state.json"))
+            if st.button("load"):
+                load_state(Path("./state.json"))
+
+    block_ids = get_block_ids()
+    if len(block_ids) > 0:
+        block_names = [
+            get(kstate.blocks.items[id].name, str, "unnamed block") for id in block_ids
+        ]
+        tabs = st.tabs(block_names)
+        for tab, block_id, block_balance in zip(tabs, block_ids, balances, strict=True):
+            with tab:
+                meta, counts = st.columns([1, 4])
+                with meta:
+                    with st.expander("block", expanded=True):
+                        st.text_input(
+                            "name", key=str(kstate.blocks.items[block_id].name)
+                        )
+                        st.button(
+                            "remove",
+                            key=str(kstate.blocks.items[block_id].remove),
+                            on_click=partial(remove_block, block_id),
+                        )
+                    with st.expander("imports", expanded=True):
+                        st.multiselect(
+                            "imports",
+                            items,
+                            key=str(kstate.blocks.items[block_id].imports),
+                            label_visibility="collapsed",
+                        )
+                        st_ivec(block_balance.imports)
+                    with st.expander("local", expanded=True):
+                        st_ivec(block_balance.local)
+                    with st.expander("exports", expanded=True):
+                        st.multiselect(
+                            "exports",
+                            items,
+                            key=str(kstate.blocks.items[block_id].exports),
+                            label_visibility="collapsed",
+                        )
+                        st_ivec(block_balance.exports)
+                with counts, st.container(horizontal=True, border=False):
+                    for count_id in get_count_ids(block_id):
+                        with st.container(width=250, border=True):
+                            st.selectbox(
+                                "building",
+                                bnames,
+                                key=str(
+                                    kstate.blocks.items[block_id]
+                                    .counts.items[count_id]
+                                    .bname
+                                ),
+                            )
+                            st.number_input(
+                                "count",
+                                key=str(
+                                    kstate.blocks.items[block_id]
+                                    .counts.items[count_id]
+                                    .count
+                                ),
+                                min_value=0,
+                            )
+                            bname = get_bname(block_id, count_id)
+                            building = buildings[bname]
+                            match building:
+                                case state.TavernBuilding() | state.SmokeryBuilding():
+                                    st.multiselect(
+                                        "takes",
+                                        sorted(building.get_take_items()),
+                                        key=str(
+                                            kstate.blocks.items[block_id]
+                                            .counts.items[count_id]
+                                            .takes
+                                        ),
+                                    )
+                                case _:
+                                    pass
+                            st.button(
+                                "remove",
+                                key=str(
+                                    kstate.blocks.items[block_id]
+                                    .counts.items[count_id]
+                                    .remove
+                                ),
+                                on_click=partial(remove_count, block_id, count_id),
+                            )
+                    st.button(
+                        "add building",
+                        key=str(kstate.blocks.items[block_id].add),
+                        on_click=partial(add_count, block_id),
+                    )
 
 
 if __name__ == "__main__":
