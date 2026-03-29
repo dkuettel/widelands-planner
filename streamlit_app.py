@@ -38,12 +38,16 @@ def st_ivec(ivec: state.Ivec):
             deficit.write(f"- {60 * ips:.1f} {i.value}/min = {rep}")
 
 
-def key_block(block_id: str) -> str:
-    return f"state.blocks.items.{block_id}"
-
-
 def key_block_ids() -> str:
     return "state.blocks.ids"
+
+
+def key_block_name(block_id: str) -> str:
+    return f"state.blocks.items.{block_id}.name"
+
+
+def key_block_remove(block_id: str) -> str:
+    return f"state.blocks.items.{block_id}.remove"
 
 
 def key_count_ids(block_id: str) -> str:
@@ -52,6 +56,14 @@ def key_count_ids(block_id: str) -> str:
 
 def key_count(block_id: str, count_id: str) -> str:
     return f"state.blocks.items.{block_id}.counts.items.{count_id}.count"
+
+
+def key_count_add(block_id: str) -> str:
+    return f"state.blocks.items.{block_id}.add"
+
+
+def key_count_remove(block_id: str, count_id: str) -> str:
+    return f"state.blocks.items.{block_id}.counts.items.{count_id}.remove"
 
 
 def key_bname(block_id: str, count_id: str) -> str:
@@ -195,7 +207,9 @@ def main():
         st.write("no blocks")
     else:
         block_names = [
-            get(kstate.blocks.items[id].name, str, "unnamed block") for id in block_ids
+            # TODO keys are now "safe", but the type not really with it
+            get(key_block_name(id), str, "unnamed block")
+            for id in block_ids
         ]
         tabs = st.tabs(block_names)
         for tab, block_id, block_balance in zip(tabs, block_ids, balances, strict=True):
@@ -203,19 +217,17 @@ def main():
                 meta, counts = st.columns([1, 4])
                 with meta:
                     with st.expander("block", expanded=True):
-                        st.text_input(
-                            "name", key=str(kstate.blocks.items[block_id].name)
-                        )
+                        st.text_input("name", key=key_block_name(block_id))
                         st.button(
                             "remove",
-                            key=str(kstate.blocks.items[block_id].remove),
+                            key=key_block_remove(block_id),
                             on_click=partial(remove_block, block_id),
                         )
                     with st.expander("imports", expanded=True):
                         st.multiselect(
                             "imports",
                             items,
-                            key=str(kstate.blocks.items[block_id].imports),
+                            key=key_imports(block_id),
                             label_visibility="collapsed",
                         )
                         st_ivec(block_balance.imports)
@@ -225,7 +237,7 @@ def main():
                         st.multiselect(
                             "exports",
                             items,
-                            key=str(kstate.blocks.items[block_id].exports),
+                            key=key_exports(block_id),
                             label_visibility="collapsed",
                         )
                         st_ivec(block_balance.exports)
@@ -233,22 +245,10 @@ def main():
                     for count_id in get_count_ids(block_id):
                         with st.container(width=250, border=True):
                             st.selectbox(
-                                "building",
-                                bnames,
-                                key=str(
-                                    kstate.blocks.items[block_id]
-                                    .counts.items[count_id]
-                                    .bname
-                                ),
+                                "building", bnames, key=key_bname(block_id, count_id)
                             )
                             st.number_input(
-                                "count",
-                                key=str(
-                                    kstate.blocks.items[block_id]
-                                    .counts.items[count_id]
-                                    .count
-                                ),
-                                min_value=0,
+                                "count", key=key_count(block_id, count_id), min_value=0
                             )
                             bname = get_bname(block_id, count_id)
                             building = buildings[bname]
@@ -257,26 +257,18 @@ def main():
                                     st.multiselect(
                                         "takes",
                                         sorted(building.get_take_items()),
-                                        key=str(
-                                            kstate.blocks.items[block_id]
-                                            .counts.items[count_id]
-                                            .takes
-                                        ),
+                                        key=key_takes(block_id, count_id),
                                     )
                                 case _:
                                     pass
                             st.button(
                                 "remove",
-                                key=str(
-                                    kstate.blocks.items[block_id]
-                                    .counts.items[count_id]
-                                    .remove
-                                ),
+                                key=key_count_remove(block_id, count_id),
                                 on_click=partial(remove_count, block_id, count_id),
                             )
                     st.button(
                         "add building",
-                        key=str(kstate.blocks.items[block_id].add),
+                        key=key_count_add(block_id),
                         on_click=partial(add_count, block_id),
                     )
 
