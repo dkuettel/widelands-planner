@@ -451,5 +451,10 @@ def main():
                     )
 
 
+# TODO problems
+# ordering of buildings, finding them, and not duplicating for those where it doesnt make sense?
+# adding tab, or renaming, resets to viewing the first tab
+# adding a building doesnt fokus on the name selection, but maybe there are buttons for adding the right one in the first place?
+
 if __name__ == "__main__":
     main()
