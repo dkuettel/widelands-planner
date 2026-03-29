@@ -3,7 +3,6 @@ from __future__ import annotations
 import json
 from functools import partial
 from pathlib import Path
-from typing import override
 from uuid import uuid4
 
 import streamlit as st
@@ -25,21 +24,6 @@ def load_state(path: Path):
     st.session_state.update(state)
 
 
-class Key:
-    def __init__(self, at: tuple[str, ...] = ()):
-        self.__at = at
-
-    def __getitem__(self, name: str) -> Key:
-        return Key((*self.__at, name))
-
-    def __getattr__(self, name: str) -> Key:
-        return self[name]
-
-    @override
-    def __str__(self) -> str:
-        return ".".join(self.__at)
-
-
 def st_ivec(ivec: state.Ivec):
     deficit = st.container(gap=None)
     deficit.write("**deficit**")
@@ -54,86 +38,92 @@ def st_ivec(ivec: state.Ivec):
             deficit.write(f"- {60 * ips:.1f} {i.value}/min = {rep}")
 
 
-kstate = Key().state
+def key_block(block_id: str) -> str:
+    return f"state.blocks.items.{block_id}"
 
 
-def get[T](key: Key, ty: type[T], default: T) -> T:
-    value = st.session_state.setdefault(str(key), default)
+def key_block_ids() -> str:
+    return "state.blocks.ids"
+
+
+def key_count_ids(block_id: str) -> str:
+    return f"state.blocks.items.{block_id}.counts.ids"
+
+
+def key_count(block_id: str, count_id: str) -> str:
+    return f"state.blocks.items.{block_id}.counts.items.{count_id}.count"
+
+
+def key_bname(block_id: str, count_id: str) -> str:
+    return f"state.blocks.items.{block_id}.counts.items.{count_id}.bname"
+
+
+def key_takes(block_id: str, count_id: str) -> str:
+    return f"state.blocks.items.{block_id}.counts.items.{count_id}.takes"
+
+
+def key_imports(block_id: str) -> str:
+    return f"state.blocks.items.{block_id}.counts.items.imports"
+
+
+def key_exports(block_id: str) -> str:
+    return f"state.blocks.items.{block_id}.counts.items.exports"
+
+
+def get[T](key: str, ty: type[T], default: T) -> T:
+    value = st.session_state.setdefault(key, default)
     # TODO check type better
     # assert isinstance(value, ty)
     return value
 
 
 def get_block_ids() -> list[str]:
-    return get(kstate.blocks.ids, list[str], [])
+    return get(key_block_ids(), list[str], [])
 
 
 def add_block():
     id = uuid4().hex
-    get(kstate.blocks.ids, list[str], []).append(id)
+    get(key_block_ids(), list[str], []).append(id)
 
 
 def remove_block(id: str):
-    get(kstate.blocks.ids, list[str], []).remove(id)
+    get(key_block_ids(), list[str], []).remove(id)
 
 
 def get_count_ids(block_id: str) -> list[str]:
-    return get(kstate.blocks.items[block_id].counts.ids, list[str], [])
-
-
-def get_count(block_id: str, count_id: str) -> int:
-    # TODO so i guess we could just make Key so that it only has valid keys? if we want it documented?
-    return get(kstate.blocks.items[block_id].counts.items[count_id].count, int, 0)
+    return get(key_count_ids(block_id), list[str], [])
 
 
 def add_count(block_id: str):
-    id = uuid4().hex
-    get(kstate.blocks.items[block_id].counts.ids, list[str], []).append(id)
+    count_id = uuid4().hex
+    get(key_count_ids(block_id), list[str], []).append(count_id)
 
 
 def remove_count(block_id: str, count_id: str):
-    get(kstate.blocks.items[block_id].counts.ids, list[str], []).remove(count_id)
+    get(key_count_ids(block_id), list[str], []).remove(count_id)
+
+
+def get_count(block_id: str, count_id: str) -> int:
+    return get(key_count(block_id, count_id), int, 0)
 
 
 def get_bname(block_id: str, count_id: str) -> state.Bname:
     # TODO does this return str or a Bname?
-    return get(
-        kstate.blocks.items[block_id].counts.items[count_id].bname,
-        state.Bname,
-        state.Bname.fishers_houses,
-    )
+    return get(key_bname(block_id, count_id), state.Bname, state.Bname.fishers_houses)
 
 
 def get_takes(
     block_id: str, count_id: str, default: set[state.Item]
 ) -> set[state.Item]:
-    return set(
-        get(
-            kstate.blocks.items[block_id].counts.items[count_id].takes,
-            list[state.Item],
-            list(default),
-        )
-    )
+    return set(get(key_takes(block_id, count_id), list[state.Item], list(default)))
 
 
 def get_imports(block_id: str) -> set[state.Item]:
-    return set(
-        get(
-            kstate.blocks.items[block_id].imports,
-            list[state.Item],
-            list(),
-        )
-    )
+    return set(get(key_imports(block_id), list[state.Item], list()))
 
 
 def get_exports(block_id: str) -> set[state.Item]:
-    return set(
-        get(
-            kstate.blocks.items[block_id].exports,
-            list[state.Item],
-            list(),
-        )
-    )
+    return set(get(key_exports(block_id), list[state.Item], list()))
 
 
 def get_state(
