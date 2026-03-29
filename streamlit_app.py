@@ -402,12 +402,15 @@ def main():
                 with counts, st.container(horizontal=True, border=False):
                     for count_state in block.counts:
                         with st.container(width=250, border=True):
-                            st.selectbox("building", bnames, key=count_state.bname.key)
-                            st.number_input(
-                                "count", key=count_state.count.key, min_value=0
-                            )
                             bname = count_state.bname.get()
                             building = buildings[bname]
+                            # TODO could give hint here based on local balance?
+                            st.selectbox("building", bnames, key=count_state.bname.key)
+                            st.number_input(
+                                "count",
+                                key=count_state.count.key,
+                                min_value=0,
+                            )
                             match building:
                                 case state.TavernBuilding() | state.SmokeryBuilding():
                                     st.multiselect(
@@ -422,6 +425,9 @@ def main():
                                 key=count_state.remove.key,
                                 on_click=count_state.remove_fn(),
                             )
+                    # TODO could have buttons for all the likey candidates?
+                    # and even the non-configures ones plus 1, other add and plus?
+                    # but that could also be in the local meta info right next to it?
                     st.button(
                         "add building",
                         key=block.counts.add.key,
