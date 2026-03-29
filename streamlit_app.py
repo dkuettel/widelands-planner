@@ -654,7 +654,9 @@ def main():
                 load_state(Path("./state.json"))
 
     block_ids = get_block_ids()
-    if len(block_ids) > 0:
+    if len(block_ids) == 0:
+        st.write("no blocks")
+    else:
         block_names = [
             get(kstate.blocks.items[id].name, str, "unnamed block") for id in block_ids
         ]
