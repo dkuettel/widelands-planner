@@ -38,16 +38,6 @@ class IntState:
 
 
 @dataclass(frozen=True)
-class ButtonState:
-    key: str
-
-    @classmethod
-    def from_key(cls, key: str):
-        # NOTE buttons cant be tracked as state, it will refuse to load
-        return cls(f"button.{key}")
-
-
-@dataclass(frozen=True)
 class EnumState[T: StrEnum]:
     key: str
     ty: type[T]
@@ -71,7 +61,6 @@ class CountState:
     parent: BlockCountState
     id: str
     count: IntState
-    remove: ButtonState
     bname: EnumState[state.Bname]
     takes: SetState[state.Item]
 
@@ -81,7 +70,6 @@ class CountState:
             parent=parent,
             id=id,
             count=IntState(f"{key}.count", 0),
-            remove=ButtonState.from_key(f"{key}.remove"),
             bname=EnumState(f"{key}.bname", state.Bname, state.Bname.fishers_houses),
             takes=SetState(f"{key}.takes", state.Item),
         )
@@ -94,7 +82,6 @@ class CountState:
 class BlockCountState:
     key: str
     ids: StrListState
-    add: ButtonState
 
     def __getitem__(self, id: str) -> CountState:
         return CountState.from_key(self, id, f"{self.key}.items.{id}")
@@ -108,7 +95,6 @@ class BlockCountState:
         return cls(
             key=key,
             ids=StrListState(f"{key}.ids"),
-            add=ButtonState.from_key(f"{key}.add"),
         )
 
     def add_fn(self):
@@ -120,7 +106,6 @@ class BlockState:
     parent: BlocksState
     id: str
     name: StrState
-    remove: ButtonState
     counts: BlockCountState
     imports: SetState[state.Item]
     exports: SetState[state.Item]
@@ -131,7 +116,6 @@ class BlockState:
             parent=parent,
             id=id,
             name=StrState(f"{key}.name", "unnamed block"),
-            remove=ButtonState.from_key(f"{key}.remove"),
             counts=BlockCountState.from_key(key),
             imports=SetState(f"{key}.imports", state.Item),
             exports=SetState(f"{key}.exports", state.Item),
@@ -160,7 +144,6 @@ class StrListState:
 class BlocksState:
     key: str
     ids: StrListState
-    add: ButtonState
 
     def __getitem__(self, id: str) -> BlockState:
         return BlockState.from_key(self, id, f"{self.key}.items.{id}")
@@ -174,7 +157,6 @@ class BlocksState:
         return cls(
             key=key,
             ids=StrListState(f"{key}.ids"),
-            add=ButtonState.from_key(f"{key}.add"),
         )
 
 
@@ -390,7 +372,7 @@ def main():
                         st.text_input("name", key=block.name.key)
                         st.button(
                             "remove",
-                            key=block.remove.key,
+                            key=f"button.block[{block.id}].remove",
                             on_click=block.remove_fn(),
                         )
                     with st.expander("imports", expanded=True):
@@ -440,7 +422,7 @@ def main():
                                     assert False, never  # pyright: ignore[reportUnreachable]
                             st.button(
                                 "remove",
-                                key=count_state.remove.key,
+                                key=f"button.block[{block.id}].count[{count_state.id}].remove",
                                 on_click=count_state.remove_fn(),
                             )
                     # TODO could have buttons for all the likey candidates?
@@ -448,7 +430,7 @@ def main():
                     # but that could also be in the local meta info right next to it?
                     st.button(
                         "add building",
-                        key=block.counts.add.key,
+                        key=f"button.add",
                         on_click=block.counts.add_fn(),
                     )
 
