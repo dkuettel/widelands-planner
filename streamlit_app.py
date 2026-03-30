@@ -430,7 +430,7 @@ def main():
                     # but that could also be in the local meta info right next to it?
                     st.button(
                         "add building",
-                        key=f"button.add",
+                        key=f"button.block[{block.id}].add",
                         on_click=block.counts.add_fn(),
                     )
 
