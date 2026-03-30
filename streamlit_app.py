@@ -382,7 +382,7 @@ def main():
         tabs = st.tabs(block_names)
         for tab, block, block_balance in zip(tabs, ss.blocks, balances, strict=True):
             with tab:
-                meta, counts = st.columns([1, 4])
+                meta, counts = st.columns([1, 4], gap="large")
                 with meta:
                     with st.expander("block", expanded=True):
                         st.text_input("name", key=block.name.key)
