@@ -309,10 +309,10 @@ def get_takes(
 
 
 def get_state(
-    ss: SessionState,
+    session: SessionState,
     buildings: dict[state.Bname, state.Building],
 ) -> tuple[list[state.BlockBalance], state.Ivec]:
-    balances = [get_state_block(buildings, block) for block in ss.blocks]
+    balances = [get_state_block(buildings, block) for block in session.blocks]
     balance = state.get_global_balance(balances)
     return balances, balance
 
@@ -358,9 +358,9 @@ def get_state_block_count(
 def main():
     st.set_page_config(page_title="widelands planner", layout="wide")
 
-    ss = SessionState.from_key()
+    session = SessionState.from_key()
     buildings = state.get_buildings()
-    balances, balance = get_state(ss, buildings)
+    balances, balance = get_state(session, buildings)
     bnames = sorted(state.Bname)
     items = state.get_items()
 
@@ -375,12 +375,14 @@ def main():
             st.button("save", on_click=save_state)
             st.button("load", on_click=load_state)
 
-    block_names = [block.name.get() for block in ss.blocks]
+    block_names = [block.name.get() for block in session.blocks]
     if len(block_names) == 0:
         st.write("no blocks")
     else:
         tabs = st.tabs(block_names)
-        for tab, block, block_balance in zip(tabs, ss.blocks, balances, strict=True):
+        for tab, block, block_balance in zip(
+            tabs, session.blocks, balances, strict=True
+        ):
             with tab:
                 meta, counts = st.columns([1, 4], gap="large")
                 with meta:
