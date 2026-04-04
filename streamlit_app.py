@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from enum import StrEnum
 from functools import partial
 from pathlib import Path
+from typing import assert_never
 from uuid import uuid4
 
 import streamlit as st
@@ -63,6 +64,7 @@ class CountState:
     count: IntState
     bname: EnumState[state.Bname]
     takes: SetState[state.Item]
+    makes: SetState[state.Item]
 
     @classmethod
     def from_key(cls, parent: BlockCountState, id: str, key: str):
@@ -72,6 +74,7 @@ class CountState:
             count=IntState(f"{key}.count", 0),
             bname=EnumState(f"{key}.bname", state.Bname, state.Bname.fishers_houses),
             takes=SetState(f"{key}.takes", state.Item),
+            makes=SetState(f"{key}.makes", state.Item),
         )
 
     def remove_fn(self):
@@ -331,10 +334,15 @@ def get_state_block_count(
             return state.BuildingCount(
                 count, state.ConfiguredFurnaceBuilding(building, takes)
             )
+        case state.SmallArmorSmithy():
+            makes = count_state.makes.get(building.get_make_items())
+            return state.BuildingCount(
+                count, state.ConfiguredSmallArmorSmithy(building, makes)
+            )
         case state.PlainBuilding():
             return state.BuildingCount(count, building)
-        case _ as never:  # pyright: ignore[reportUnnecessaryComparison]
-            assert False, never  # pyright: ignore[reportUnreachable]
+        case _ as never:
+            assert_never(never)
 
 
 def main():
@@ -416,10 +424,16 @@ def main():
                                         sorted(building.get_take_items()),
                                         key=count_state.takes.key,
                                     )
+                                case state.SmallArmorSmithy():
+                                    st.multiselect(
+                                        "makes",
+                                        sorted(building.get_make_items()),
+                                        key=count_state.makes.key,
+                                    )
                                 case state.PlainBuilding():
                                     pass
-                                case _ as never:  # pyright: ignore[reportUnnecessaryComparison]
-                                    assert False, never  # pyright: ignore[reportUnreachable]
+                                case _ as never:
+                                    assert_never(never)
                             st.button(
                                 "remove",
                                 key=f"button.block[{block.id}].count[{count_state.id}].remove",

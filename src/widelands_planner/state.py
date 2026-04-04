@@ -27,6 +27,11 @@ class Item(StrEnum):
     beer = "beer"
     iron_ore = "iron ore"
     iron = "iron"
+    gold_ore = "gold ore"
+    gold = "gold"
+    short_sword = "short sword"
+    long_sword = "long sword"
+    helmet = "helmet"
 
 
 def get_items() -> list[Item]:
@@ -52,6 +57,7 @@ class Bname(StrEnum):
     bakeries = "bakeries"
     iron_mines = "iron mines"
     furnaces = "furnaces"
+    small_armor_smithy = "small armor smithy"
 
 
 @dataclass(frozen=True)
@@ -94,6 +100,9 @@ class Ivec:
 
     def smul(self, s: float) -> Ivec:
         return Ivec({i: s * v for (i, v) in self.data.items()})
+
+    def sdiv(self, s: float) -> Ivec:
+        return self.smul(1 / s)
 
     def div(self, other: Ivec) -> Ivec:
         def div(a: float, b: float) -> float:
@@ -269,26 +278,24 @@ class ConfiguredSmokeryBuilding:
 @dataclass(frozen=True)
 class FurnaceBuilding:
     def get_take_items(self) -> set[Item]:
-        return {Item.iron_ore}  # TODO gold_ore soon
+        return {Item.iron_ore, Item.gold_ore}
 
     def get_ips(self, takes: set[Item]) -> TakeMake:
-        ins = {Item.iron_ore} & takes
-        if ins:
-            r = 1 / 64
-            return TakeMake(
-                Ivec(
-                    {
-                        Item.coal: r,
-                        Item.iron_ore: r,
-                    }
-                ),
-                Ivec(
-                    {
-                        Item.iron: r,
-                    }
-                ),
-            )
-        return TakeMake.from_zeros()
+        dt = 0  # cycle duration seconds
+        tk = Ivec.from_zeros()  # cycle take items
+        mk = Ivec.from_zeros()  # cycle make items
+
+        if Item.iron_ore in takes:
+            dt += 2 * 64
+            tk = tk.add(Ivec({Item.coal: 1, Item.iron_ore: 1}).smul(2))
+            mk = mk.add(Ivec({Item.iron: 1}).smul(2))
+
+        if Item.gold_ore in takes:
+            dt += 66
+            tk = tk.add(Ivec({Item.coal: 1, Item.gold_ore: 1}))
+            mk = mk.add(Ivec({Item.gold: 1}))
+
+        return TakeMake(take=tk.sdiv(dt), make=mk.sdiv(dt))
 
     def takes_ips(self, takes: set[Item]) -> Ivec:
         return self.get_ips(takes).take
@@ -297,12 +304,12 @@ class FurnaceBuilding:
         return self.get_ips(takes).make
 
     def representative_count_from_ips(self, item: Item, ips: float) -> float:
-        match item:
-            case Item.iron:
-                r = 1 / 64
-                return ips / r
-            case _:
+        rep = self.get_ips(self.get_take_items())
+        match rep.make[item]:
+            case 0:
                 return 0
+            case r:
+                return ips / r
 
 
 @dataclass(frozen=True)
@@ -317,11 +324,72 @@ class ConfiguredFurnaceBuilding:
         return self.building.makes_ips(self.takes)
 
 
-type Building = PlainBuilding | TavernBuilding | SmokeryBuilding | FurnaceBuilding
+@dataclass(frozen=True)
+class SmallArmorSmithy:
+    def get_make_items(self) -> set[Item]:
+        return {Item.short_sword, Item.long_sword, Item.helmet}
+
+    def get_ips(self, makes: set[Item]) -> TakeMake:
+        dt = 10  # cycle duration seconds
+        tk = Ivec.from_zeros()  # cycle take items
+        mk = Ivec.from_zeros()  # cycle make items
+
+        if Item.short_sword in makes:
+            dt += 58
+            tk = tk.add(Ivec({Item.coal: 1, Item.iron: 1}))
+            mk = mk.add(Ivec({Item.short_sword: 1}))
+
+        if Item.long_sword in makes:
+            dt += 58
+            tk = tk.add(Ivec({Item.coal: 1, Item.iron: 2}).smul(2))
+            mk = mk.add(Ivec({Item.long_sword: 1}).smul(2))
+
+        if Item.helmet in makes:
+            dt += 68
+            tk = tk.add(Ivec({Item.coal: 1, Item.iron: 1}))
+            mk = mk.add(Ivec({Item.helmet: 1}))
+
+        return TakeMake(take=tk.sdiv(dt), make=mk.sdiv(dt))
+
+    def takes_ips(self, makes: set[Item]) -> Ivec:
+        return self.get_ips(makes).take
+
+    def makes_ips(self, makes: set[Item]) -> Ivec:
+        return self.get_ips(makes).make
+
+    def representative_count_from_ips(self, item: Item, ips: float) -> float:
+        rep = self.get_ips(self.get_make_items())
+        match rep.make[item]:
+            case 0:
+                return 0
+            case r:
+                return ips / r
+
+
+@dataclass(frozen=True)
+class ConfiguredSmallArmorSmithy:
+    building: SmallArmorSmithy
+    makes: set[Item]
+
+    def takes_ips(self) -> Ivec:
+        return self.building.takes_ips(self.makes)
+
+    def makes_ips(self) -> Ivec:
+        return self.building.makes_ips(self.makes)
+
+
+type Building = (
+    PlainBuilding
+    | TavernBuilding
+    | SmokeryBuilding
+    | SmallArmorSmithy
+    | FurnaceBuilding
+)
 type ConfiguredBuilding = (
     PlainBuilding
     | ConfiguredTavernBuilding
     | ConfiguredSmokeryBuilding
+    | ConfiguredSmallArmorSmithy
     | ConfiguredFurnaceBuilding
 )
 
@@ -405,6 +473,7 @@ def get_buildings() -> dict[Bname, Building]:
             Ivec({Item.bread: 1}),
         ),
         Bname.furnaces: FurnaceBuilding(),
+        Bname.small_armor_smithy: SmallArmorSmithy(),
     }
     assert set(buildings) == set(Bname), set(Bname) - set(buildings)
     return dict(sorted(buildings.items()))
