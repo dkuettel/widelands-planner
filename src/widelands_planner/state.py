@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import math
-from collections.abc import Iterator, Set
+from collections.abc import Iterator, Sequence, Set
 from dataclasses import dataclass
 from enum import StrEnum
 
@@ -32,6 +32,18 @@ class Item(StrEnum):
     short_sword = "short sword"
     long_sword = "long sword"
     helmet = "helmet"
+    pick = "pick"
+    felling_axe = "felling axe"
+    shovel = "shovel"
+    hammer = "hammer"
+    hunting_spear = "hunting spear"
+    scythe = "scythe"
+    bread_paddle = "bread paddle"
+    kitchen_tools = "kitchen tools"
+    needles = "needles"
+    basket = "basket"
+    fire_tongs = "fire tongs"
+    fishing_net = "fishing net"
 
 
 def get_items() -> list[Item]:
@@ -58,6 +70,7 @@ class Bname(StrEnum):
     iron_mines = "iron mines"
     furnaces = "furnaces"
     small_armor_smithy = "small armor smithy"
+    blacksmithy = "blacksmithy"
 
 
 @dataclass(frozen=True)
@@ -70,7 +83,7 @@ class Ivec:
         return cls(dict())
 
     @classmethod
-    def from_sum(cls, rates: list[Ivec]):
+    def from_sum(cls, rates: Sequence[Ivec]):
         items = {i for r in rates for i in r.data}
         return cls({i: sum(r[i] for r in rates) for i in items})
 
@@ -117,6 +130,9 @@ class Ivec:
 
     def keep_positives(self) -> Ivec:
         return Ivec({i: v for (i, v) in self.data.items() if v > 0})
+
+    def nonzero_items(self) -> set[Item]:
+        return {i for (i, v) in self.data.items() if v != 0}
 
 
 @dataclass(frozen=True)
@@ -378,12 +394,75 @@ class ConfiguredSmallArmorSmithy:
         return self.building.makes_ips(self.makes)
 
 
+@dataclass(frozen=True)
+class Crafting:
+    take: Ivec
+    make: Ivec
+    seconds: float
+
+
+# TODO maybe this can cover all cases?
+@dataclass(frozen=True)
+class GenericBuilding:
+    craftings: list[Crafting]
+    pause: float
+
+    def get_take_items(self) -> set[Item]:
+        return {i for c in self.craftings for i in c.take.nonzero_items()}
+
+    def get_make_items(self) -> set[Item]:
+        return {i for c in self.craftings for i in c.make.nonzero_items()}
+
+    def get_ips(self, takes: set[Item], makes: set[Item]) -> TakeMake:
+        dt = 0  # cycle duration seconds
+        tk = Ivec.from_zeros()  # cycle take items
+        mk = Ivec.from_zeros()  # cycle make items
+
+        for c in self.craftings:
+            if takes >= c.take.nonzero_items() and makes & c.make.nonzero_items():
+                dt += c.seconds
+                tk = tk.add(c.take)
+                mk = mk.add(c.make)
+
+        dt += self.pause
+
+        return TakeMake(take=tk.sdiv(dt), make=mk.sdiv(dt))
+
+    def takes_ips(self, takes: set[Item], makes: set[Item]) -> Ivec:
+        return self.get_ips(takes, makes).take
+
+    def makes_ips(self, takes: set[Item], makes: set[Item]) -> Ivec:
+        return self.get_ips(takes, makes).make
+
+    def representative_count_from_ips(self, item: Item, ips: float) -> float:
+        rep = self.get_ips(self.get_take_items(), self.get_make_items())
+        match rep.make[item]:
+            case 0:
+                return 0
+            case r:
+                return ips / r
+
+
+@dataclass(frozen=True)
+class ConfiguredGenericBuilding:
+    building: GenericBuilding
+    takes: set[Item]
+    makes: set[Item]
+
+    def takes_ips(self) -> Ivec:
+        return self.building.takes_ips(self.takes, self.makes)
+
+    def makes_ips(self) -> Ivec:
+        return self.building.makes_ips(self.takes, self.makes)
+
+
 type Building = (
     PlainBuilding
     | TavernBuilding
     | SmokeryBuilding
     | SmallArmorSmithy
     | FurnaceBuilding
+    | GenericBuilding
 )
 type ConfiguredBuilding = (
     PlainBuilding
@@ -391,6 +470,7 @@ type ConfiguredBuilding = (
     | ConfiguredSmokeryBuilding
     | ConfiguredSmallArmorSmithy
     | ConfiguredFurnaceBuilding
+    | ConfiguredGenericBuilding
 )
 
 
@@ -418,6 +498,7 @@ def rate_from_seconds(seconds: float | tuple[float, float]) -> float:
 
 
 def get_buildings() -> dict[Bname, Building]:
+    dt_tools = 70.167
     buildings = {
         Bname.taverns: TavernBuilding(),
         Bname.smokeries: SmokeryBuilding(),
@@ -474,6 +555,30 @@ def get_buildings() -> dict[Bname, Building]:
         ),
         Bname.furnaces: FurnaceBuilding(),
         Bname.small_armor_smithy: SmallArmorSmithy(),
+        Bname.blacksmithy: GenericBuilding(
+            craftings=[
+                Crafting(Ivec({Item.iron: 1, Item.log: 1}), Ivec({i: 1}), dt_tools)
+                for i in {
+                    Item.pick,
+                    Item.felling_axe,
+                    Item.shovel,
+                    Item.hammer,
+                    Item.hunting_spear,
+                    Item.scythe,
+                    Item.bread_paddle,
+                    Item.kitchen_tools,
+                }
+            ]
+            + [
+                Crafting(Ivec({Item.iron: 1}), Ivec({Item.needles: 2}), dt_tools),
+                Crafting(
+                    Ivec({Item.reed: 1, Item.log: 1}), Ivec({Item.basket: 1}), dt_tools
+                ),
+                Crafting(Ivec({Item.iron: 1}), Ivec({Item.fire_tongs: 1}), dt_tools),
+                Crafting(Ivec({Item.reed: 2}), Ivec({Item.fishing_net: 1}), dt_tools),
+            ],
+            pause=10,
+        ),
     }
     assert set(buildings) == set(Bname), set(Bname) - set(buildings)
     return dict(sorted(buildings.items()))

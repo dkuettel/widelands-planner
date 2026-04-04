@@ -339,6 +339,12 @@ def get_state_block_count(
             return state.BuildingCount(
                 count, state.ConfiguredSmallArmorSmithy(building, makes)
             )
+        case state.GenericBuilding():
+            takes = count_state.takes.get(building.get_take_items())
+            makes = count_state.makes.get(building.get_make_items())
+            return state.BuildingCount(
+                count, state.ConfiguredGenericBuilding(building, takes, makes)
+            )
         case state.PlainBuilding():
             return state.BuildingCount(count, building)
         case _ as never:
@@ -425,6 +431,17 @@ def main():
                                         key=count_state.takes.key,
                                     )
                                 case state.SmallArmorSmithy():
+                                    st.multiselect(
+                                        "makes",
+                                        sorted(building.get_make_items()),
+                                        key=count_state.makes.key,
+                                    )
+                                case state.GenericBuilding():
+                                    st.multiselect(
+                                        "takes",
+                                        sorted(building.get_take_items()),
+                                        key=count_state.takes.key,
+                                    )
                                     st.multiselect(
                                         "makes",
                                         sorted(building.get_make_items()),
