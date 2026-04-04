@@ -1,0 +1,3 @@
+[submodule "widelands"]
+	path = widelands
+	url = git@github.com:widelands/widelands.git
