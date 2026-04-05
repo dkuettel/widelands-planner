@@ -210,17 +210,14 @@ def load_state(path: Path | None = None):
 
 
 def st_ivec(ivec: state.Ivec):
-    deficit = st.container(gap=None)
-    deficit.write("**deficit**")
-    surplus = st.container(gap=None)
-    surplus.write("**surplus**")
-    for i, ips in ivec.sorted():
-        counts = state.building_count_from_ips(i, ips)
-        rep = " or ".join(f"{c:.1f} {b.value}" for b, c in counts)
-        if ips > 0:
-            surplus.write(f"- {60 * ips:.1f} {i.value}/min = {rep}")
-        else:
-            deficit.write(f"- {60 * ips:.1f} {i.value}/min = {rep}")
+    with st.container(gap=None):
+        for i, ips in ivec.sorted():
+            counts = state.building_count_from_ips(i, ips)
+            rep = " or ".join(f"{c:.1f} {b.value}" for b, c in counts)
+            if ips > 0:
+                st.write(f"- {60 * ips:.1f} {i.value}/min = {rep}")
+            else:
+                st.write(f"- **{60 * ips:.1f} {i.value}/min = {rep}**")
 
 
 def key_block_ids() -> str:
@@ -403,7 +400,7 @@ def main():
             with tab:
                 meta, counts = st.columns([1, 4], gap="large")
                 with meta:
-                    with st.expander("block", expanded=True):
+                    with st.expander("block", expanded=False):
                         st.text_input("name", key=block.name.key)
                         st.button(
                             "remove",
@@ -497,8 +494,8 @@ def main():
 # adding a building doesnt fokus on the name selection, but maybe there are buttons for adding the right one in the first place?
 # save all the time, keep a timeline? save version to load old stuff?
 # order buildings, by feed-into-order?
-# import export show better (no surplus/deficit)
 # instead, say what blocks you want to import from? a map would almost be easier :) with a flow
+# dont show representative count? or only if surplus and more than one? or just show percentage of normal building?
 
 if __name__ == "__main__":
     main()
