@@ -323,11 +323,6 @@ def get_state_block_count(
     bname = count_state.bname.get()
     building = buildings[bname]
     match building:
-        case state.TavernBuilding():
-            takes = count_state.takes.get(building.get_take_items())
-            return state.BuildingCount(
-                count, state.ConfiguredTavernBuilding(building, takes)
-            )
         case state.GenericBuilding():
             takes = count_state.takes.get(building.get_take_items())
             makes = count_state.makes.get(building.get_make_items())
@@ -345,8 +340,6 @@ def fn_change_building_type(count_state: CountState):
         count_state.count.set(0)
         building = state.get_buildings()[count_state.bname.get()]
         match building:
-            case state.TavernBuilding():
-                count_state.takes.set(building.get_take_items())
             case state.GenericBuilding():
                 count_state.takes.set(building.get_take_items())
                 count_state.makes.set(building.get_make_items())
@@ -432,12 +425,6 @@ def main():
                                 min_value=0,
                             )
                             match building:
-                                case state.TavernBuilding():
-                                    st.multiselect(
-                                        "takes",
-                                        sorted(building.get_take_items()),
-                                        key=count_state.takes.key,
-                                    )
                                 case state.GenericBuilding():
                                     st.multiselect(
                                         "takes",

@@ -182,71 +182,11 @@ class TakeMake:
 
 
 @dataclass(frozen=True)
-class TavernBuilding:
-    def get_take_items(self) -> set[Item]:
-        return {Item.fruit, Item.bread, Item.smoked_fish, Item.smoked_meat}
-
-    def get_ips(self, takes: Set[Item]) -> TakeMake:
-        tr = take_ratio
-
-        in1 = {Item.fruit, Item.bread} & takes
-        in2 = {Item.smoked_fish, Item.smoked_meat} & takes
-        if in1 and in2:  # with both inputs, we produce 2 for 2 at a faster rate
-            r = 1 / 37
-            return TakeMake(
-                Ivec(
-                    {
-                        Item.fruit: r / 2 * tr(Item.fruit, in1),
-                        Item.bread: r / 2 * tr(Item.bread, in1),
-                        Item.smoked_fish: r / 2 * tr(Item.smoked_fish, in2),
-                        Item.smoked_meat: r / 2 * tr(Item.smoked_meat, in2),
-                    }
-                ),
-                Ivec({Item.ration: r}),
-            )
-
-        ins = {Item.fruit, Item.bread, Item.smoked_fish, Item.smoked_meat} & takes
-        if ins:  # with just one input we produce 1 for 1 but slower
-            r = 1 / 55
-            return TakeMake(
-                Ivec({i: (r * tr(i, ins)) for i in ins}),
-                Ivec({Item.ration: r}),
-            )
-
-        return TakeMake.from_zeros()
-
-    def takes_ips(self, takes: Set[Item]) -> Ivec:
-        return self.get_ips(takes).take
-
-    def makes_ips(self, takes: Set[Item]) -> Ivec:
-        return self.get_ips(takes).make
-
-    def representative_count_from_ips(self, item: Item, ips: float) -> float:
-        match item:
-            case Item.ration:
-                r = 1 / 37
-                return ips / r
-            case _:
-                return 0
-
-
-@dataclass(frozen=True)
-class ConfiguredTavernBuilding:
-    building: TavernBuilding
-    takes: set[Item]
-
-    def takes_ips(self) -> Ivec:
-        return self.building.takes_ips(self.takes)
-
-    def makes_ips(self) -> Ivec:
-        return self.building.makes_ips(self.takes)
-
-
-@dataclass(frozen=True)
 class Crafting:
     take: Ivec
     make: Ivec
     seconds: float
+    unless: None | set[Item] = None  # skip this crafting when these items are available
 
 
 @dataclass(frozen=True)
@@ -284,7 +224,11 @@ class GenericBuilding:
         mk = Ivec.from_zeros()  # cycle make items
 
         for c in self.craftings:
-            if takes >= c.take.nonzero_items() and makes & c.make.nonzero_items():
+            if (
+                takes >= c.take.nonzero_items()
+                and (c.unless is None or not (takes & c.unless))
+                and makes & c.make.nonzero_items()
+            ):
                 dt += c.seconds
                 tk = tk.add(c.take)
                 mk = mk.add(c.make)
@@ -324,10 +268,8 @@ class ConfiguredGenericBuilding:
         return self.building.makes_ips(self.takes, self.makes)
 
 
-type Building = PlainBuilding | TavernBuilding | GenericBuilding
-type ConfiguredBuilding = (
-    PlainBuilding | ConfiguredTavernBuilding | ConfiguredGenericBuilding
-)
+type Building = PlainBuilding | GenericBuilding
+type ConfiguredBuilding = PlainBuilding | ConfiguredGenericBuilding
 
 
 @dataclass(frozen=True)
@@ -444,13 +386,55 @@ def building_from_name(name: Bname) -> Building:
                 pause=10,
             )
         case Bname.tavern:
-            return TavernBuilding()
-            # TODO oh, this one is different based on whats available as input
-            # return GenericBuilding(
-            #     craftings=[
-            #         Crafting(),
-            #     ]
-            # )
+            return GenericBuilding(
+                craftings=[
+                    Crafting(
+                        Ivec({Item.fruit: 1}),
+                        Ivec({Item.ration: 1}),
+                        55,
+                        unless={Item.smoked_fish, Item.smoked_meat},
+                    ),
+                    Crafting(
+                        Ivec({Item.bread: 1}),
+                        Ivec({Item.ration: 1}),
+                        55,
+                        unless={Item.smoked_fish, Item.smoked_meat},
+                    ),
+                    Crafting(
+                        Ivec({Item.smoked_fish: 1}),
+                        Ivec({Item.ration: 1}),
+                        55,
+                        unless={Item.fruit, Item.bread},
+                    ),
+                    Crafting(
+                        Ivec({Item.smoked_meat: 1}),
+                        Ivec({Item.ration: 1}),
+                        55,
+                        unless={Item.fruit, Item.bread},
+                    ),
+                    Crafting(
+                        Ivec({Item.fruit: 1, Item.smoked_fish: 1}),
+                        Ivec({Item.ration: 2}),
+                        74,
+                    ),
+                    Crafting(
+                        Ivec({Item.fruit: 1, Item.smoked_meat: 1}),
+                        Ivec({Item.ration: 2}),
+                        74,
+                    ),
+                    Crafting(
+                        Ivec({Item.bread: 1, Item.smoked_fish: 1}),
+                        Ivec({Item.ration: 2}),
+                        74,
+                    ),
+                    Crafting(
+                        Ivec({Item.bread: 1, Item.smoked_meat: 1}),
+                        Ivec({Item.ration: 2}),
+                        74,
+                    ),
+                ],
+                pause=0,
+            )
         case Bname.smokery:
             return GenericBuilding(
                 [
