@@ -476,7 +476,7 @@ def main():
                                 key=f"button.block[{block.id}].count[{count_state.id}].remove",
                                 on_click=count_state.remove_fn(),
                             )
-                    # TODO could have buttons for all the likey candidates?
+                    # TODO could have buttons for all the likely candidates?
                     # and even the non-configures ones plus 1, other add and plus?
                     # but that could also be in the local meta info right next to it?
                     st.button(
@@ -490,7 +490,6 @@ def main():
 # ordering of buildings, finding them, and not duplicating for those where it doesnt make sense?
 # adding tab, or renaming, resets to viewing the first tab
 # adding a building doesnt fokus on the name selection, but maybe there are buttons for adding the right one in the first place?
-# add a usage slider, or "backed up" button when you dont expect it to be running full speed?
 
 if __name__ == "__main__":
     main()
