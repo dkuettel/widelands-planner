@@ -159,7 +159,7 @@ class Crafting:
 
 
 @dataclass(frozen=True)
-class GenericBuilding:
+class BaseBuilding:
     craftings: list[Crafting]
     pause: float
 
@@ -226,7 +226,7 @@ class GenericBuilding:
 
 @dataclass(frozen=True)
 class ConfiguredGenericBuilding:
-    building: GenericBuilding
+    building: BaseBuilding
     takes: set[Item]
     makes: set[Item]
 
@@ -237,7 +237,7 @@ class ConfiguredGenericBuilding:
         return self.building.makes_ips(self.takes, self.makes)
 
 
-type Building = GenericBuilding
+type Building = BaseBuilding
 type ConfiguredBuilding = ConfiguredGenericBuilding
 
 
@@ -280,7 +280,7 @@ def extract_plain_timings(path: Path) -> tuple[float, float]:
 
 @cache
 def building_from_name(name: Bname) -> Building:
-    b = partial(GenericBuilding.from_lua, timings=name.name)
+    b = partial(BaseBuilding.from_lua, timings=name.name)
     # TODO extracting take and make is difficult from the custom lua programs strings
     match name:
         case Bname.foresters_house:
@@ -320,7 +320,7 @@ def building_from_name(name: Bname) -> Building:
         case Bname.blacksmithy:
             dt = 70.167
             # TODO hm maybe could be extracted? timings at least
-            return GenericBuilding(
+            return BaseBuilding(
                 craftings=[
                     Crafting(Ivec({Item.iron: 1, Item.log: 1}), Ivec({i: 1}), dt)
                     for i in {
@@ -347,7 +347,7 @@ def building_from_name(name: Bname) -> Building:
                 pause=10,
             )
         case Bname.tavern:
-            return GenericBuilding(
+            return BaseBuilding(
                 craftings=[
                     Crafting(
                         Ivec({Item.fruit: 1}),
@@ -397,7 +397,7 @@ def building_from_name(name: Bname) -> Building:
                 pause=0,
             )
         case Bname.smokery:
-            return GenericBuilding(
+            return BaseBuilding(
                 [
                     Crafting(
                         Ivec({Item.log: 1, Item.fish: 2}),
@@ -413,7 +413,7 @@ def building_from_name(name: Bname) -> Building:
                 0,
             )
         case Bname.furnace:
-            return GenericBuilding(
+            return BaseBuilding(
                 [
                     Crafting(
                         Ivec({Item.coal: 1, Item.iron_ore: 1}), Ivec({Item.iron: 1}), 64
@@ -428,7 +428,7 @@ def building_from_name(name: Bname) -> Building:
                 0,
             )
         case Bname.small_armor_smithy:
-            return GenericBuilding(
+            return BaseBuilding(
                 [
                     Crafting(
                         Ivec({Item.coal: 1, Item.iron: 1}),
