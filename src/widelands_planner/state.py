@@ -141,37 +141,6 @@ class Ivec:
 
 
 @dataclass(frozen=True)
-class PlainBuilding:
-    takes: Ivec
-    rate: float  # "takes" into "makes" per second
-    makes: Ivec
-
-    @classmethod
-    def from_seconds(cls, short: float, long: float, count: int, item: Item):
-        # TODO do we want to adjust this? arent we often in the more optimal case?
-        return cls(Ivec.from_zeros(), 1 / ((short + long) / 2), Ivec({item: count}))
-
-    def __post_init__(self):
-        assert self.rate >= 0
-
-    def takes_ips(self) -> Ivec:
-        return self.takes.smul(self.rate)
-
-    def makes_ips(self) -> Ivec:
-        return self.makes.smul(self.rate)
-
-    def representative_count_from_ips(self, item: Item, ips: float) -> float:
-        m = self.makes[item]
-        if m == 0:
-            return 0
-        return ips / (m * self.rate)
-
-
-def take_ratio(item: Item, takes: Set[Item]) -> float:
-    return len({item} & takes) / len(takes)
-
-
-@dataclass(frozen=True)
 class TakeMake:
     take: Ivec
     make: Ivec
@@ -268,8 +237,8 @@ class ConfiguredGenericBuilding:
         return self.building.makes_ips(self.takes, self.makes)
 
 
-type Building = PlainBuilding | GenericBuilding
-type ConfiguredBuilding = PlainBuilding | ConfiguredGenericBuilding
+type Building = GenericBuilding
+type ConfiguredBuilding = ConfiguredGenericBuilding
 
 
 @dataclass(frozen=True)
@@ -285,14 +254,6 @@ class BuildingCount:
 
     def makes_ips(self) -> Ivec:
         return self.building.makes_ips().smul(self.count)
-
-
-def rate_from_seconds(seconds: float | tuple[float, float]) -> float:
-    match seconds:
-        case [a, b]:
-            return 1 / ((a + b) / 2)
-        case t:
-            return 1 / t
 
 
 def extract_plain_timings(path: Path) -> tuple[float, float]:
