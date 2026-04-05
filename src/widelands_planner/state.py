@@ -47,6 +47,9 @@ class Item(StrEnum):
     basket = "basket"
     fire_tongs = "fire tongs"
     fishing_net = "fishing net"
+    fur_garment = "fur garment"
+    deer = "deer"
+    fur = "fur"
 
 
 def get_items() -> list[Item]:
@@ -76,6 +79,9 @@ class Bname(StrEnum):
     furnace = "furnaces"
     small_armor_smithy = "small armor smithies"
     blacksmithy = "blacksmithies"
+    barracks = "barracks"
+    reindeer_farm = "reindeer farms"
+    sewing_room = "sewing room"
 
 
 @dataclass(frozen=True)
@@ -139,6 +145,9 @@ class Ivec:
     def nonzero_items(self) -> set[Item]:
         return {i for (i, v) in self.data.items() if v != 0}
 
+    def is_zero(self) -> bool:
+        return all(v == 0 for v in self.data.values())
+
 
 @dataclass(frozen=True)
 class TakeMake:
@@ -198,7 +207,7 @@ class BaseBuilding:
             if (
                 takes >= c.take.nonzero_items()
                 and (c.unless is None or not (takes & c.unless))
-                and makes & c.make.nonzero_items()
+                and (c.make.is_zero() or makes & c.make.nonzero_items())
             ):
                 short, long = c.seconds
                 dt += speed * short + (1 - speed) * long
@@ -323,6 +332,10 @@ def building_from_name(name: Bname) -> Building:
             return b({Item.barley: 1, Item.water: 1}, {Item.bread: 1})
         case Bname.bakery:
             return b({Item.barley: 1, Item.water: 1}, {Item.bread: 1})
+        case Bname.barracks:
+            return b({Item.fur_garment: 1, Item.short_sword: 1}, {})
+        case Bname.sewing_room:
+            return b({Item.fur: 2}, {Item.fur_garment: 1})
         case Bname.blacksmithy:
             dt = (70.167, 70.167)
             # TODO hm maybe could be extracted? timings at least
@@ -459,6 +472,44 @@ def building_from_name(name: Bname) -> Building:
                     ),
                 ],
                 10,
+            )
+        case Bname.reindeer_farm:
+            # TODO it actually makes meat, even when only fur is needed
+            # maybe after all this part needs to just be code?
+            return BaseBuilding(
+                [
+                    Crafting(
+                        Ivec({Item.water: 1, Item.barley: 1}),
+                        Ivec({Item.deer: 1}),
+                        (30, 30),
+                    ),
+                    Crafting(
+                        Ivec({Item.water: 1, Item.barley: 1}),
+                        Ivec({Item.fur: 1}),
+                        (38.6, 38.6),
+                    ),
+                    Crafting(
+                        Ivec({Item.water: 1, Item.barley: 1}),
+                        Ivec({Item.deer: 1}),
+                        (30, 30),
+                    ),
+                    Crafting(
+                        Ivec({Item.water: 1, Item.barley: 1}),
+                        Ivec({Item.fur: 1}),
+                        (38.6, 38.6),
+                    ),
+                    Crafting(
+                        Ivec({Item.water: 1, Item.barley: 1}),
+                        Ivec({Item.deer: 1}),
+                        (30, 30),
+                    ),
+                    Crafting(
+                        Ivec({Item.water: 1, Item.barley: 1}),
+                        Ivec({Item.fur: 1, Item.meat: 1}),
+                        (42.2, 42.2),
+                    ),
+                ],
+                0,
             )
         case _ as never:
             assert_never(never)
