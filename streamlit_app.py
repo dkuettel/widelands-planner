@@ -492,6 +492,10 @@ def main():
 # ordering of buildings, finding them, and not duplicating for those where it doesnt make sense?
 # adding tab, or renaming, resets to viewing the first tab
 # adding a building doesnt fokus on the name selection, but maybe there are buttons for adding the right one in the first place?
+# save all the time, keep a timeline? save version to load old stuff?
+# fold the configuration for smaller view? remove some labels to make tighter?
+# order buildings, by feed-into-order?
+# import export show better (no surplus/deficit)
 
 if __name__ == "__main__":
     main()
