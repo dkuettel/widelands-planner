@@ -496,6 +496,8 @@ def main():
 # fold the configuration for smaller view? remove some labels to make tighter?
 # order buildings, by feed-into-order?
 # import export show better (no surplus/deficit)
+# instead, say what blocks you want to import from? a map would almost be easier :) with a flow
+# something wrong with breweries, like bakery?
 
 if __name__ == "__main__":
     main()
