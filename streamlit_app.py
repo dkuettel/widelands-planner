@@ -81,6 +81,7 @@ class CountState:
     takes: SetState[state.Item]
     makes: SetState[state.Item]
     usage: FloatState
+    speed: FloatState
 
     @classmethod
     def from_key(cls, parent: BlockCountState, id: str, key: str):
@@ -93,6 +94,7 @@ class CountState:
             takes=SetState(f"{key}.takes", state.Item),
             makes=SetState(f"{key}.makes", state.Item),
             usage=FloatState(f"{key}.usage", 1),
+            speed=FloatState(f"{key}.speed", 1),
         )
 
     def remove_fn(self):
@@ -341,8 +343,11 @@ def get_state_block_count(
             takes = count_state.takes.get(building.get_take_items())
             makes = count_state.makes.get(building.get_make_items())
             usage = count_state.usage.get()
+            speed = count_state.speed.get()
             return state.BuildingCount(
-                count, state.ConfiguredGenericBuilding(building, takes, makes), usage
+                count,
+                state.ConfiguredGenericBuilding(building, takes, makes, speed),
+                usage,
             )
         case _ as never:
             assert_never(never)
@@ -357,6 +362,7 @@ def fn_change_building_type(count_state: CountState):
                 count_state.takes.set(building.get_take_items())
                 count_state.makes.set(building.get_make_items())
                 count_state.usage.set(1)
+                count_state.speed.set(1)
             case _ as never:
                 assert_never(never)
 
@@ -368,6 +374,7 @@ def main():
 
     session = SessionState.from_key()
     buildings = state.get_buildings()
+    # TODO danger: state you didnt touch will not be defaulted right now
     balances, balance = get_state(session, buildings)
     bnames = sorted(state.Bname)
     items = state.get_items()
@@ -441,6 +448,13 @@ def main():
                                 min_value=0.0,
                                 max_value=1.0,
                                 key=count_state.usage.key,
+                                step=0.1,
+                            )
+                            st.slider(
+                                "speed",
+                                min_value=0.0,
+                                max_value=1.0,
+                                key=count_state.speed.key,
                                 step=0.1,
                             )
                             match building:
