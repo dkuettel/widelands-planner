@@ -192,7 +192,8 @@ class SessionState:
         return cls(BlocksState.from_key(f"{key}.blocks"))
 
 
-def save_state(path: Path = Path("./state.json")):
+def save_state(path: Path | None = None):
+    path = Path("./state.json")
     state = {
         k: v
         for (k, v) in st.session_state.items()
@@ -202,7 +203,8 @@ def save_state(path: Path = Path("./state.json")):
     path.write_text(json.dumps(state, indent="  "))
 
 
-def load_state(path: Path = Path("./state.json")):
+def load_state(path: Path | None = None):
+    path = Path("./state.json")
     state = json.loads(path.read_text())
     st.session_state.update(state)
 
@@ -265,7 +267,7 @@ def key_exports(block_id: str) -> str:
     return f"state.blocks.items.{block_id}.counts.items.exports"
 
 
-def get[T](key: str, ty: type[T], default: T) -> T:
+def get[T](key: str, _ty: type[T], default: T) -> T:
     value = st.session_state.setdefault(key, default)
     # TODO check type better
     # assert isinstance(value, ty)
