@@ -328,21 +328,6 @@ def get_state_block_count(
             return state.BuildingCount(
                 count, state.ConfiguredTavernBuilding(building, takes)
             )
-        case state.SmokeryBuilding():
-            takes = count_state.takes.get(building.get_take_items())
-            return state.BuildingCount(
-                count, state.ConfiguredSmokeryBuilding(building, takes)
-            )
-        case state.FurnaceBuilding():
-            takes = count_state.takes.get(building.get_take_items())
-            return state.BuildingCount(
-                count, state.ConfiguredFurnaceBuilding(building, takes)
-            )
-        case state.SmallArmorSmithy():
-            makes = count_state.makes.get(building.get_make_items())
-            return state.BuildingCount(
-                count, state.ConfiguredSmallArmorSmithy(building, makes)
-            )
         case state.GenericBuilding():
             takes = count_state.takes.get(building.get_take_items())
             makes = count_state.makes.get(building.get_make_items())
@@ -360,14 +345,8 @@ def fn_change_building_type(count_state: CountState):
         count_state.count.set(0)
         building = state.get_buildings()[count_state.bname.get()]
         match building:
-            case (
-                state.TavernBuilding()
-                | state.SmokeryBuilding()
-                | state.FurnaceBuilding()
-            ):
+            case state.TavernBuilding():
                 count_state.takes.set(building.get_take_items())
-            case state.SmallArmorSmithy():
-                count_state.makes.set(building.get_make_items())
             case state.GenericBuilding():
                 count_state.takes.set(building.get_take_items())
                 count_state.makes.set(building.get_make_items())
@@ -453,21 +432,11 @@ def main():
                                 min_value=0,
                             )
                             match building:
-                                case (
-                                    state.TavernBuilding()
-                                    | state.SmokeryBuilding()
-                                    | state.FurnaceBuilding()
-                                ):
+                                case state.TavernBuilding():
                                     st.multiselect(
                                         "takes",
                                         sorted(building.get_take_items()),
                                         key=count_state.takes.key,
-                                    )
-                                case state.SmallArmorSmithy():
-                                    st.multiselect(
-                                        "makes",
-                                        sorted(building.get_make_items()),
-                                        key=count_state.makes.key,
                                     )
                                 case state.GenericBuilding():
                                     st.multiselect(
