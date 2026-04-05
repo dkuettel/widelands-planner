@@ -213,11 +213,21 @@ def st_ivec(ivec: state.Ivec):
     with st.container(gap=None):
         for i, ips in ivec.sorted():
             counts = state.building_count_from_ips(i, ips)
-            rep = " or ".join(f"{c:.1f} {b.value}" for b, c in counts)
+            # TODO which representative to show?
+            [(_name, count), *_] = counts
             if ips > 0:
-                st.write(f"- {60 * ips:.1f} {i.value}/min = {rep}")
+                if count >= 1:
+                    st.write(
+                        f"- {60 * ips:.1f} {i.value}/min (**{round(count * 100):+}%**)"
+                    )
+                else:
+                    st.write(
+                        f"- {60 * ips:.1f} {i.value}/min ({round(count * 100):+}%)"
+                    )
             else:
-                st.write(f"- **{60 * ips:.1f} {i.value}/min = {rep}**")
+                st.write(
+                    f"- **{60 * ips:.1f} {i.value}/min ({round(count * 100):+}%)**"
+                )
 
 
 def key_block_ids() -> str:
@@ -495,7 +505,7 @@ def main():
 # save all the time, keep a timeline? save version to load old stuff?
 # order buildings, by feed-into-order?
 # instead, say what blocks you want to import from? a map would almost be easier :) with a flow
-# dont show representative count? or only if surplus and more than one? or just show percentage of normal building?
+# a table might be better for balance?
 
 if __name__ == "__main__":
     main()
