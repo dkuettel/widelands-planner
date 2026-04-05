@@ -329,7 +329,7 @@ def building_from_name(name: Bname) -> Building:
         case Bname.berry_farm:
             return b({}, {Item.berry_bush: 1})
         case Bname.brewery:
-            return b({Item.barley: 1, Item.water: 1}, {Item.bread: 1})
+            return b({Item.barley: 1, Item.water: 1}, {Item.beer: 1})
         case Bname.bakery:
             return b({Item.barley: 1, Item.water: 1}, {Item.bread: 1})
         case Bname.barracks:
