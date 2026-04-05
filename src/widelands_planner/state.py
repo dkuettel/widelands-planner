@@ -245,15 +245,17 @@ type ConfiguredBuilding = ConfiguredGenericBuilding
 class BuildingCount:
     count: int
     building: ConfiguredBuilding
+    usage: float
 
     def __post_init__(self):
         assert self.count >= 0
+        assert 0 <= self.usage <= 1
 
     def takes_ips(self) -> Ivec:
-        return self.building.takes_ips().smul(self.count)
+        return self.building.takes_ips().smul(self.count * self.usage)
 
     def makes_ips(self) -> Ivec:
-        return self.building.makes_ips().smul(self.count)
+        return self.building.makes_ips().smul(self.count * self.usage)
 
 
 def extract_plain_timings(path: Path) -> tuple[float, float]:

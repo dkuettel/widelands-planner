@@ -39,6 +39,18 @@ class IntState:
 
 
 @dataclass(frozen=True)
+class FloatState:
+    key: str
+    default: float
+
+    def get(self) -> float:
+        return st.session_state.setdefault(self.key, self.default)
+
+    def set(self, value: float):
+        st.session_state[self.key] = value
+
+
+@dataclass(frozen=True)
 class EnumState[T: StrEnum]:
     key: str
     ty: type[T]
@@ -68,6 +80,7 @@ class CountState:
     bname: EnumState[state.Bname]
     takes: SetState[state.Item]
     makes: SetState[state.Item]
+    usage: FloatState
 
     @classmethod
     def from_key(cls, parent: BlockCountState, id: str, key: str):
@@ -79,6 +92,7 @@ class CountState:
             bname=EnumState(f"{key}.bname", state.Bname, state.Bname.fishers_house),
             takes=SetState(f"{key}.takes", state.Item),
             makes=SetState(f"{key}.makes", state.Item),
+            usage=FloatState(f"{key}.usage", 1),
         )
 
     def remove_fn(self):
@@ -326,8 +340,9 @@ def get_state_block_count(
         case state.BaseBuilding():
             takes = count_state.takes.get(building.get_take_items())
             makes = count_state.makes.get(building.get_make_items())
+            usage = count_state.usage.get()
             return state.BuildingCount(
-                count, state.ConfiguredGenericBuilding(building, takes, makes)
+                count, state.ConfiguredGenericBuilding(building, takes, makes), usage
             )
         case _ as never:
             assert_never(never)
@@ -341,6 +356,7 @@ def fn_change_building_type(count_state: CountState):
             case state.BaseBuilding():
                 count_state.takes.set(building.get_take_items())
                 count_state.makes.set(building.get_make_items())
+                count_state.usage.set(1)
             case _ as never:
                 assert_never(never)
 
@@ -419,6 +435,13 @@ def main():
                                 "count",
                                 key=count_state.count.key,
                                 min_value=0,
+                            )
+                            st.slider(
+                                "usage",
+                                min_value=0.0,
+                                max_value=1.0,
+                                key=count_state.usage.key,
+                                step=0.1,
                             )
                             match building:
                                 case state.BaseBuilding():
