@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import json
-from collections.abc import Iterator
+from collections.abc import Iterator, Mapping
 from dataclasses import dataclass
 from enum import StrEnum
 from functools import partial
@@ -75,7 +75,8 @@ class CountState:
             parent=parent,
             id=id,
             count=IntState(f"{key}.count", 0),
-            bname=EnumState(f"{key}.bname", state.Bname, state.Bname.fishers_houses),
+            # TODO could there be a none building?
+            bname=EnumState(f"{key}.bname", state.Bname, state.Bname.fishers_house),
             takes=SetState(f"{key}.takes", state.Item),
             makes=SetState(f"{key}.makes", state.Item),
         )
@@ -287,7 +288,7 @@ def get_count(block_id: str, count_id: str) -> int:
 
 def get_bname(block_id: str, count_id: str) -> state.Bname:
     # TODO does this return str or a Bname?
-    return get(key_bname(block_id, count_id), state.Bname, state.Bname.fishers_houses)
+    return get(key_bname(block_id, count_id), state.Bname, state.Bname.fishers_house)
 
 
 def get_takes(
@@ -298,7 +299,7 @@ def get_takes(
 
 def get_state(
     session: SessionState,
-    buildings: dict[state.Bname, state.Building],
+    buildings: Mapping[state.Bname, state.Building],
 ) -> tuple[list[state.BlockBalance], state.Ivec]:
     balances = [get_state_block(buildings, block) for block in session.blocks]
     balance = state.get_global_balance(balances)
@@ -306,7 +307,7 @@ def get_state(
 
 
 def get_state_block(
-    buildings: dict[state.Bname, state.Building], block: BlockState
+    buildings: Mapping[state.Bname, state.Building], block: BlockState
 ) -> state.BlockBalance:
     imports = block.imports.get(set())
     counts = [get_state_block_count(buildings, count) for count in block.counts]
@@ -316,7 +317,7 @@ def get_state_block(
 
 
 def get_state_block_count(
-    buildings: dict[state.Bname, state.Building], count_state: CountState
+    buildings: Mapping[state.Bname, state.Building], count_state: CountState
 ) -> state.BuildingCount:
     count = count_state.count.get()
     bname = count_state.bname.get()

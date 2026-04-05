@@ -24,3 +24,4 @@ ignore = ["widelands"]
 reportUnusedCallResult = false
 reportAny = false                   # st.session_state
 reportUnnecessaryComparison = false # for case _ as never
+reportUnreachable = false           # for assert_never

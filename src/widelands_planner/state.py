@@ -1,9 +1,12 @@
 from __future__ import annotations
 
 import math
-from collections.abc import Iterator, Sequence, Set
+import re
+from collections.abc import Iterator, Mapping, Sequence, Set
 from dataclasses import dataclass
 from enum import StrEnum
+from functools import cache, partial
+from pathlib import Path
 
 
 class Item(StrEnum):
@@ -50,27 +53,29 @@ def get_items() -> list[Item]:
     return sorted(Item, key=lambda i: i.value)
 
 
+# NOTE the name is the widelands lua name, the value is the plural string
+# TODO still not sure how robust is st.multiselect and co with enums and round-trips
 class Bname(StrEnum):
-    taverns = "taverns"
-    smokeries = "smokeries"
-    fishers_houses = "fisher's houses"
-    foresters_houses = "forester's houses"
-    woodcutters_houses = "woodcutter's houses"
-    wells = "wells"
-    farms = "farms"
-    reed_farms = "reed farms"
-    coal_mines = "coal mines"
-    rock_mines = "rock mines"
-    clay_pits = "clay pits"
-    brick_kilns = "brick kilns"
-    fruit_collectors_houses = "fruit collector's houses"
-    berry_farms = "berry farms"
-    breweries = "breweries"
-    bakeries = "bakeries"
-    iron_mines = "iron mines"
-    furnaces = "furnaces"
-    small_armor_smithy = "small armor smithy"
-    blacksmithy = "blacksmithy"
+    tavern = "taverns"
+    smokery = "smokeries"
+    fishers_house = "fisher's houses"
+    foresters_house = "forester's houses"
+    woodcutters_house = "woodcutter's houses"
+    well = "wells"
+    farm = "farms"
+    reed_farm = "reed farms"
+    coalmine = "coal mines"
+    rockmine = "rock mines"
+    clay_pit = "clay pits"
+    brick_kiln = "brick kilns"
+    collectors_house = "fruit collector's houses"
+    berry_farm = "berry farms"
+    brewery = "breweries"
+    bakery = "bakeries"
+    ironmine = "iron mines"
+    furnace = "furnaces"
+    small_armor_smithy = "small armor smithies"
+    blacksmithy = "blacksmithies"
 
 
 @dataclass(frozen=True)
@@ -401,11 +406,28 @@ class Crafting:
     seconds: float
 
 
-# TODO maybe this can cover all cases?
 @dataclass(frozen=True)
 class GenericBuilding:
     craftings: list[Crafting]
     pause: float
+
+    @classmethod
+    def from_lua(cls, take: dict[Item, float], make: dict[Item, float], timings: str):
+        path = Path(
+            f"widelands/data/tribes/buildings/productionsites/frisians/{timings}/init.lua"
+        )
+        short, long = extract_plain_timings(path)
+        return cls(
+            [
+                Crafting(
+                    take=Ivec(take),
+                    make=Ivec(make),
+                    # TODO i want to make that configurable, we are probably more often in the short case
+                    seconds=(short + long) / 2,
+                )
+            ],
+            0,
+        )
 
     def get_take_items(self) -> set[Item]:
         return {i for c in self.craftings for i in c.take.nonzero_items()}
@@ -426,7 +448,10 @@ class GenericBuilding:
 
         dt += self.pause
 
-        return TakeMake(take=tk.sdiv(dt), make=mk.sdiv(dt))
+        if dt > 0:
+            return TakeMake(take=tk.sdiv(dt), make=mk.sdiv(dt))
+
+        return TakeMake(take=Ivec.from_zeros(), make=Ivec.from_zeros())
 
     def takes_ips(self, takes: set[Item], makes: set[Item]) -> Ivec:
         return self.get_ips(takes, makes).take
@@ -497,90 +522,112 @@ def rate_from_seconds(seconds: float | tuple[float, float]) -> float:
             return 1 / t
 
 
-def get_buildings() -> dict[Bname, Building]:
-    dt_tools = 70.167
-    buildings = {
-        Bname.taverns: TavernBuilding(),
-        Bname.smokeries: SmokeryBuilding(),
-        Bname.fishers_houses: PlainBuilding.from_seconds(26, 59, 1, Item.fish),
-        Bname.foresters_houses: PlainBuilding.from_seconds(24, 46, 1, Item.tree),
-        Bname.woodcutters_houses: PlainBuilding(
-            Ivec({Item.tree: 1}),
-            rate_from_seconds((49, 89)),
-            Ivec({Item.log: 1}),
-        ),
-        Bname.wells: PlainBuilding.from_seconds(44, 44, 1, Item.water),
-        Bname.farms: PlainBuilding.from_seconds(49, 67, 1, Item.barley),
-        Bname.reed_farms: PlainBuilding.from_seconds(52, 67, 1, Item.reed),
-        Bname.coal_mines: PlainBuilding(
-            Ivec({Item.ration: 1}),
-            rate_from_seconds(2 * 41),
-            Ivec({Item.coal: 2}),
-        ),
-        Bname.rock_mines: PlainBuilding(
-            Ivec({Item.ration: 1}),
-            rate_from_seconds(2 * 46),
-            Ivec({Item.granite: 2}),
-        ),
-        Bname.iron_mines: PlainBuilding(
-            Ivec({Item.ration: 1}),
-            rate_from_seconds(69),
-            Ivec({Item.iron_ore: 1}),
-        ),
-        Bname.clay_pits: PlainBuilding(
-            Ivec({Item.water: 1}),
-            rate_from_seconds((55, 73)),
-            Ivec({Item.clay: 1}),
-        ),
-        Bname.brick_kilns: PlainBuilding(
-            Ivec({Item.coal: 1, Item.clay: 3, Item.granite: 1}),
-            rate_from_seconds(3 * 30),
-            Ivec({Item.brick: 3}),
-        ),
-        Bname.fruit_collectors_houses: PlainBuilding(
-            Ivec({Item.berry_bush: 1}),
-            rate_from_seconds((37, 62)),
-            Ivec({Item.fruit: 1}),
-        ),
-        Bname.berry_farms: PlainBuilding.from_seconds(33, 51, 1, Item.berry_bush),
-        Bname.breweries: PlainBuilding(
-            Ivec({Item.water: 1, Item.barley: 1}),
-            rate_from_seconds(64),
-            Ivec({Item.beer: 1}),
-        ),
-        Bname.bakeries: PlainBuilding(
-            Ivec({Item.barley: 1, Item.water: 1}),
-            rate_from_seconds(44),
-            Ivec({Item.bread: 1}),
-        ),
-        Bname.furnaces: FurnaceBuilding(),
-        Bname.small_armor_smithy: SmallArmorSmithy(),
-        Bname.blacksmithy: GenericBuilding(
-            craftings=[
-                Crafting(Ivec({Item.iron: 1, Item.log: 1}), Ivec({i: 1}), dt_tools)
-                for i in {
-                    Item.pick,
-                    Item.felling_axe,
-                    Item.shovel,
-                    Item.hammer,
-                    Item.hunting_spear,
-                    Item.scythe,
-                    Item.bread_paddle,
-                    Item.kitchen_tools,
-                }
-            ]
-            + [
-                Crafting(Ivec({Item.iron: 1}), Ivec({Item.needles: 2}), dt_tools),
-                Crafting(
-                    Ivec({Item.reed: 1, Item.log: 1}), Ivec({Item.basket: 1}), dt_tools
-                ),
-                Crafting(Ivec({Item.iron: 1}), Ivec({Item.fire_tongs: 1}), dt_tools),
-                Crafting(Ivec({Item.reed: 2}), Ivec({Item.fishing_net: 1}), dt_tools),
-            ],
-            pause=10,
-        ),
-    }
-    assert set(buildings) == set(Bname), set(Bname) - set(buildings)
+def extract_plain_timings(path: Path) -> tuple[float, float]:
+    lua = path.read_text()
+
+    matches = list(
+        re.finditer(r"^ *-- time total:.*= (?P<value>[\d.]*) sec$", lua, re.MULTILINE)
+    )
+    match matches:
+        case [m]:
+            t = float(m["value"])
+            return t, t
+        case _:
+            pass
+
+    [m_min] = re.finditer(
+        r"^ *-- min\. time total:.*= *(?P<value>[\d.]*) sec$", lua, re.MULTILINE
+    )
+    [m_max] = re.finditer(
+        r"^ *-- max\. time total:.*= *(?P<value>[\d.]*) sec$", lua, re.MULTILINE
+    )
+    return float(m_min["value"]), float(m_max["value"])
+
+
+@cache
+def building_from_name(name: Bname) -> Building:
+    b = partial(GenericBuilding.from_lua, timings=name.name)
+    # TODO extracting take and make is difficult from the custom lua programs strings
+    match name:
+        case Bname.foresters_house:
+            return b({}, {Item.tree: 1})
+        case Bname.fishers_house:
+            return b({}, {Item.fish: 1})
+        case Bname.woodcutters_house:
+            return b({Item.tree: 1}, {Item.log: 1})
+        case Bname.well:
+            # TODO different when depleted
+            return b({}, {Item.water: 1})
+        case Bname.farm:
+            return b({}, {Item.barley: 2})
+        case Bname.reed_farm:
+            return b({}, {Item.reed: 1})
+        case Bname.coalmine:
+            # TODO different when depleted
+            return b({Item.ration: 1}, {Item.coal: 2})
+        case Bname.rockmine:
+            # TODO different when depleted
+            return b({Item.ration: 1}, {Item.granite: 2})
+        case Bname.ironmine:
+            # TODO different when depleted
+            return b({Item.ration: 1}, {Item.iron_ore: 1})
+        case Bname.clay_pit:
+            return b({Item.water: 1}, {Item.clay: 1})
+        case Bname.brick_kiln:
+            return b({Item.coal: 1, Item.clay: 3, Item.granite: 1}, {Item.brick: 3})
+        case Bname.collectors_house:
+            return b({Item.berry_bush: 1}, {Item.fruit: 1})
+        case Bname.berry_farm:
+            return b({}, {Item.berry_bush: 1})
+        case Bname.brewery:
+            return b({Item.barley: 1, Item.water: 1}, {Item.bread: 1})
+        case Bname.bakery:
+            return b({Item.barley: 1, Item.water: 1}, {Item.bread: 1})
+        case Bname.blacksmithy:
+            dt = 70.167
+            # TODO hm maybe could be extracted? timings at least
+            return GenericBuilding(
+                craftings=[
+                    Crafting(Ivec({Item.iron: 1, Item.log: 1}), Ivec({i: 1}), dt)
+                    for i in {
+                        Item.pick,
+                        Item.felling_axe,
+                        Item.shovel,
+                        Item.hammer,
+                        Item.hunting_spear,
+                        Item.scythe,
+                        Item.bread_paddle,
+                        Item.kitchen_tools,
+                    }
+                ]
+                + [
+                    Crafting(Ivec({Item.iron: 1}), Ivec({Item.needles: 2}), dt),
+                    Crafting(
+                        Ivec({Item.reed: 1, Item.log: 1}),
+                        Ivec({Item.basket: 1}),
+                        dt,
+                    ),
+                    Crafting(Ivec({Item.iron: 1}), Ivec({Item.fire_tongs: 1}), dt),
+                    Crafting(Ivec({Item.reed: 2}), Ivec({Item.fishing_net: 1}), dt),
+                ],
+                pause=10,
+            )
+        case Bname.tavern:
+            return TavernBuilding()
+        case Bname.smokery:
+            return SmokeryBuilding()
+        case Bname.furnace:
+            return FurnaceBuilding()
+        case Bname.small_armor_smithy:
+            return SmallArmorSmithy()
+        case _ as never:
+            assert_never(never)
+
+
+# TODO mutable, maybe dangerous to cache?
+@cache
+def get_buildings() -> Mapping[Bname, Building]:
+    buildings = {name: building_from_name(name) for name in Bname}
     return dict(sorted(buildings.items()))
 
 
