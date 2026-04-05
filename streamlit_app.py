@@ -506,6 +506,10 @@ def main():
 # order buildings, by feed-into-order?
 # instead, say what blocks you want to import from? a map would almost be easier :) with a flow
 # a table might be better for balance?
+# long sword, in tight production, almost always skipped because it needs to iron, unfortunate dynamics
+# when gaming out a new addition, would be nice to see the diff until "confirmed", or todo add click checkboxes
+#    (almost like a new block, and then merge it in when done)
+#    and/or a way for the blocks to be repeated, this is how you play it usually
 
 if __name__ == "__main__":
     main()
