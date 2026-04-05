@@ -439,45 +439,48 @@ def main():
                                 bnames,
                                 key=count_state.bname.key,
                                 on_change=fn_change_building_type(count_state),
+                                label_visibility="collapsed",
                             )
                             st.number_input(
                                 "count",
                                 key=count_state.count.key,
                                 min_value=0,
+                                label_visibility="collapsed",
                             )
-                            st.slider(
-                                "usage",
-                                min_value=0.0,
-                                max_value=1.0,
-                                key=count_state.usage.key,
-                                step=0.1,
-                            )
-                            st.slider(
-                                "speed",
-                                min_value=0.0,
-                                max_value=1.0,
-                                key=count_state.speed.key,
-                                step=0.1,
-                            )
-                            match building:
-                                case state.BaseBuilding():
-                                    st.multiselect(
-                                        "takes",
-                                        sorted(building.get_take_items()),
-                                        key=count_state.takes.key,
-                                    )
-                                    st.multiselect(
-                                        "makes",
-                                        sorted(building.get_make_items()),
-                                        key=count_state.makes.key,
-                                    )
-                                case _ as never:
-                                    assert_never(never)
-                            st.button(
-                                "remove",
-                                key=f"button.block[{block.id}].count[{count_state.id}].remove",
-                                on_click=count_state.remove_fn(),
-                            )
+                            with st.popover("config"):
+                                match building:
+                                    case state.BaseBuilding():
+                                        st.multiselect(
+                                            "takes",
+                                            sorted(building.get_take_items()),
+                                            key=count_state.takes.key,
+                                        )
+                                        st.multiselect(
+                                            "makes",
+                                            sorted(building.get_make_items()),
+                                            key=count_state.makes.key,
+                                        )
+                                    case _ as never:
+                                        assert_never(never)
+                                st.slider(
+                                    "usage",
+                                    min_value=0.0,
+                                    max_value=1.0,
+                                    key=count_state.usage.key,
+                                    step=0.1,
+                                )
+                                st.slider(
+                                    "speed",
+                                    min_value=0.0,
+                                    max_value=1.0,
+                                    key=count_state.speed.key,
+                                    step=0.1,
+                                )
+                                st.button(
+                                    "remove",
+                                    key=f"button.block[{block.id}].count[{count_state.id}].remove",
+                                    on_click=count_state.remove_fn(),
+                                )
                     # TODO could have buttons for all the likely candidates?
                     # and even the non-configures ones plus 1, other add and plus?
                     # but that could also be in the local meta info right next to it?
@@ -493,7 +496,6 @@ def main():
 # adding tab, or renaming, resets to viewing the first tab
 # adding a building doesnt fokus on the name selection, but maybe there are buttons for adding the right one in the first place?
 # save all the time, keep a timeline? save version to load old stuff?
-# fold the configuration for smaller view? remove some labels to make tighter?
 # order buildings, by feed-into-order?
 # import export show better (no surplus/deficit)
 # instead, say what blocks you want to import from? a map would almost be easier :) with a flow
