@@ -329,8 +329,6 @@ def get_state_block_count(
             return state.BuildingCount(
                 count, state.ConfiguredGenericBuilding(building, takes, makes)
             )
-        case state.PlainBuilding():
-            return state.BuildingCount(count, building)
         case _ as never:
             assert_never(never)
 
@@ -343,8 +341,6 @@ def fn_change_building_type(count_state: CountState):
             case state.GenericBuilding():
                 count_state.takes.set(building.get_take_items())
                 count_state.makes.set(building.get_make_items())
-            case state.PlainBuilding():
-                pass
             case _ as never:
                 assert_never(never)
 
@@ -436,8 +432,6 @@ def main():
                                         sorted(building.get_make_items()),
                                         key=count_state.makes.key,
                                     )
-                                case state.PlainBuilding():
-                                    pass
                                 case _ as never:
                                     assert_never(never)
                             st.button(
