@@ -56,6 +56,9 @@ class SetState[T: StrEnum]:
     def get(self, default: set[T]) -> set[T]:
         return set(st.session_state.setdefault(self.key, list(default)))
 
+    def set(self, value: set[T]):
+        st.session_state[self.key] = list(value)
+
 
 @dataclass(frozen=True)
 class CountState:
@@ -351,6 +354,30 @@ def get_state_block_count(
             assert_never(never)
 
 
+def fn_change_building_type(count_state: CountState):
+    def fn():
+        count_state.count.set(0)
+        building = state.get_buildings()[count_state.bname.get()]
+        match building:
+            case (
+                state.TavernBuilding()
+                | state.SmokeryBuilding()
+                | state.FurnaceBuilding()
+            ):
+                count_state.takes.set(building.get_take_items())
+            case state.SmallArmorSmithy():
+                count_state.makes.set(building.get_make_items())
+            case state.GenericBuilding():
+                count_state.takes.set(building.get_take_items())
+                count_state.makes.set(building.get_make_items())
+            case state.PlainBuilding():
+                pass
+            case _ as never:
+                assert_never(never)
+
+    return fn
+
+
 def main():
     st.set_page_config(page_title="widelands planner", layout="wide")
 
@@ -413,7 +440,12 @@ def main():
                             bname = count_state.bname.get()
                             building = buildings[bname]
                             # TODO could give hint here based on local balance?
-                            st.selectbox("building", bnames, key=count_state.bname.key)
+                            st.selectbox(
+                                "building",
+                                bnames,
+                                key=count_state.bname.key,
+                                on_change=fn_change_building_type(count_state),
+                            )
                             st.number_input(
                                 "count",
                                 key=count_state.count.key,
