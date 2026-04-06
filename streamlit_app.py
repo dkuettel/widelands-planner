@@ -214,18 +214,21 @@ def st_ivec(ivec: state.Ivec, hints: bool):
     def f(i: state.Item, ips: float) -> dict[str, str | float]:
         counts = state.building_count_from_ips(i, ips)
         # TODO which representative to show?
-        [(_name, count), *_] = counts
-        if not hints or ips >= 0:
-            return {
-                "item": f"{i}",
-                "i/min": 60 * ips,
-                "repr": count * 100,
-            }
-        return {
-            "item": f"{i} :warning:",
-            "i/min": 60 * ips,
-            "repr": count * 100,
-        }
+        match counts:
+            case [(_name, count), *_]:
+                if not hints or ips >= 0:
+                    return {
+                        "item": f"{i}",
+                        "i/min": 60 * ips,
+                        "repr": count * 100,
+                    }
+                return {
+                    "item": f"{i} :warning:",
+                    "i/min": 60 * ips,
+                    "repr": count * 100,
+                }
+            case _:
+                assert False, (i, ips)
 
     df = pd.DataFrame([f(i, ips) for (i, ips) in ivec.sorted()])
     # TODO polars is better, but styling doesnt work with st.table
