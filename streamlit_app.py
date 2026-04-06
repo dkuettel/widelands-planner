@@ -556,6 +556,13 @@ def main():
 # when gaming out a new addition, would be nice to see the diff until "confirmed", or todo add click checkboxes
 #    (almost like a new block, and then merge it in when done)
 #    and/or a way for the blocks to be repeated, this is how you play it usually
+# the soldier recruitement, and eventually the recycling is harder to model well
+#    almost thinking we could also try to solve for a steady state now, instead of a saturated one?
+#    yes, the training could use insane amounts, and very uneven
+#    or maybe we can say for those buildings what production ratio we expect?
+#    for the soldiers, assuming no war, we need every level same thruput, as the first one, obviously
+#    and thats partly the same building, so it would naturally just adapt and do whatever?
+#    so maybe lets try a forward-wave computation
 
 if __name__ == "__main__":
     main()
