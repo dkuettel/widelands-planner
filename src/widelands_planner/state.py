@@ -69,6 +69,7 @@ def get_items() -> list[Item]:
 
 # NOTE the name is the widelands lua name, the value is the plural string
 # TODO still not sure how robust is st.multiselect and co with enums and round-trips
+# TODO hmm when the values are not unique, it seems match statements dont work right then :/
 class Bname(StrEnum):
     tavern = "taverns"
     smokery = "smokeries"
@@ -86,7 +87,7 @@ class Bname(StrEnum):
     berry_farm = "berry farms"
     beekeepers_house = "beekeeper's houses"
     brewery = "breweries"
-    mead_brewery = "breweries"
+    mead_brewery = "mead breweries"
     bakery = "bakeries"
     honey_bread_bakery = "honey bread bakeries"
     ironmine = "iron mines"
@@ -362,6 +363,7 @@ def building_from_name(name: Bname) -> Building:
         case Bname.brewery:
             return b({Item.barley: 1, Item.water: 1}, {Item.beer: 1})
         case Bname.mead_brewery:
+            # TODO normal bear a bit faster here (10%)
             return BaseBuilding(
                 [
                     Crafting(
@@ -371,13 +373,13 @@ def building_from_name(name: Bname) -> Building:
                     ),
                     Crafting(
                         Ivec({Item.barley: 1, Item.water: 1}),
-                        Ivec({Item.mead: 1}),
-                        (40.667, 40.667),
-                    ),
-                    Crafting(
-                        Ivec({Item.barley: 1, Item.water: 1}),
                         Ivec({Item.beer: 1}),
                         (60.667, 60.667),
+                    ),
+                    Crafting(
+                        Ivec({Item.barley: 1, Item.water: 1, Item.honey: 1}),
+                        Ivec({Item.mead: 1}),
+                        (65.667, 65.667),
                     ),
                 ],
                 10,

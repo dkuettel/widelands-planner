@@ -213,7 +213,7 @@ def load_state(path: Path | None = None):
 def st_ivec(ivec: state.Ivec, hints: bool):
     def f(i: state.Item, ips: float) -> dict[str, str | float]:
         counts = state.building_count_from_ips(i, ips)
-        # TODO which representative to show?
+        # TODO which representative to show? take smallest (best) count?
         match counts:
             case [(_name, count), *_]:
                 if not hints or ips >= 0:
@@ -228,7 +228,7 @@ def st_ivec(ivec: state.Ivec, hints: bool):
                     "repr": count * 100,
                 }
             case _:
-                assert False, (i, ips)
+                assert False, (i, ips, counts)
 
     df = pd.DataFrame([f(i, ips) for (i, ips) in ivec.sorted()])
     # TODO polars is better, but styling doesnt work with st.table
