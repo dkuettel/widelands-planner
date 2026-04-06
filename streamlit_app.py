@@ -426,13 +426,6 @@ def main():
             with tab:
                 meta, counts = st.columns([1, 4], gap="large")
                 with meta:
-                    with st.expander("block", expanded=False):
-                        st.text_input("name", key=block.name.key)
-                        st.button(
-                            "remove",
-                            key=f"button.block[{block.id}].remove",
-                            on_click=block.remove_fn(),
-                        )
                     with st.expander("imports", expanded=True):
                         st.multiselect(
                             "imports",
@@ -451,6 +444,13 @@ def main():
                             label_visibility="collapsed",
                         )
                         st_ivec(block_balance.exports, hints=False)
+                    with st.expander("block", expanded=False):
+                        st.text_input("name", key=block.name.key)
+                        st.button(
+                            "remove",
+                            key=f"button.block[{block.id}].remove",
+                            on_click=block.remove_fn(),
+                        )
                 with counts, st.container(horizontal=True, border=False):
                     for count_state in block.counts:
                         with st.container(width=250, border=True):
