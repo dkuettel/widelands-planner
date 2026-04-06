@@ -424,7 +424,7 @@ def main():
             tabs, session.blocks, balances, strict=True
         ):
             with tab:
-                meta, counts = st.columns([1, 4], gap="large")
+                meta, counts = st.columns([1, 4], gap="medium")
                 with meta:
                     with st.expander("imports", expanded=True):
                         st.multiselect(
@@ -451,26 +451,28 @@ def main():
                             key=f"button.block[{block.id}].remove",
                             on_click=block.remove_fn(),
                         )
-                with counts, st.container(horizontal=True, border=False):
+                with counts, st.container(horizontal=False, border=False):
                     for count_state in block.counts:
-                        with st.container(width=250, border=True):
+                        with st.container(horizontal=True, border=True):
                             bname = count_state.bname.get()
                             building = buildings[bname]
                             # TODO could give hint here based on local balance?
+                            st.number_input(
+                                "count",
+                                key=count_state.count.key,
+                                min_value=0,
+                                label_visibility="collapsed",
+                                width=150,
+                            )
                             st.selectbox(
                                 "building",
                                 bnames,
                                 key=count_state.bname.key,
                                 on_change=fn_change_building_type(count_state),
                                 label_visibility="collapsed",
+                                width=250,
                             )
-                            st.number_input(
-                                "count",
-                                key=count_state.count.key,
-                                min_value=0,
-                                label_visibility="collapsed",
-                            )
-                            with st.popover("config"):
+                            with st.popover(""):
                                 match building:
                                     case state.BaseBuilding():
                                         st.multiselect(
@@ -504,6 +506,27 @@ def main():
                                     key=f"button.block[{block.id}].count[{count_state.id}].remove",
                                     on_click=count_state.remove_fn(),
                                 )
+                            with st.container(horizontal=True, gap="small"):
+                                # TODO shouldnt have to give default values here, add to constructor?
+                                st.write(
+                                    "".join(
+                                        [
+                                            "**",
+                                            " + ".join(
+                                                sorted(count_state.takes.get(set()))
+                                            )
+                                            or "{}",
+                                            " -> ",
+                                            " + ".join(
+                                                sorted(count_state.makes.get(set()))
+                                            )
+                                            or "{}",
+                                            "**",
+                                        ]
+                                    )
+                                )
+                                st.write(f"usage@{count_state.usage.get() * 100}%")
+                                st.write(f"speed@{count_state.speed.get() * 100}%")
                     # TODO could have buttons for all the likely candidates?
                     # and even the non-configures ones plus 1, other add and plus?
                     # but that could also be in the local meta info right next to it?
