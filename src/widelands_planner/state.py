@@ -2,7 +2,8 @@ from __future__ import annotations
 
 import math
 import re
-from collections.abc import Iterator, Mapping, Sequence
+from collections import defaultdict
+from collections.abc import Iterator, Mapping, Sequence, Set
 from dataclasses import dataclass
 from enum import StrEnum
 from functools import cache, partial
@@ -167,6 +168,12 @@ class Ivec:
 
     def is_zero(self) -> bool:
         return all(v == 0 for v in self.data.values())
+
+    def include(self, items: Set[Item]) -> Ivec:
+        return Ivec({i: v for (i, v) in self.data.items() if i in items})
+
+    def exclude(self, items: Set[Item]) -> Ivec:
+        return Ivec({i: v for (i, v) in self.data.items() if i not in items})
 
 
 @dataclass(frozen=True)
@@ -839,3 +846,35 @@ def building_count_from_ips(item: Item, ips: float) -> list[tuple[Bname, float]]
         if c != 0:
             counts.append((name, c))
     return counts
+
+
+# def get_balance(blocks: list[Block]) -> None:
+#     # NOTE probably assuming no cycles in the production graph (frisians might have one eventually)
+#
+#     takes: dict[int | None, Ivec] = defaultdict(Ivec.from_zeros)
+#     makes: dict[int | None, Ivec] = defaultdict(Ivec.from_zeros)
+#     # TODO initialize with last solution
+#     takes, makes = None, None
+#
+#     while todo(takes, makes):
+#         last_takes, last_makes = takes, makes
+#
+#         takes: dict[int | None, Ivec] = defaultdict(Ivec.from_zeros)
+#         makes: dict[int | None, Ivec] = defaultdict(Ivec.from_zeros)
+#
+#         for block in blocks:
+#             for count in block.buildings:
+#                 # TODO an Ivec on (block|None, Item) would be easier now? flat and full?
+#                 # TODO also, a block is not really isolated, so we cant just half-ass produce there :/ it wont happen
+#                 # this only goes for global stuff, arrrg
+#                 # what if we compute everything global, but warn about non-local leaking, except for the ones we import/export?
+#                 lt = last_takes[id(block)].add(last_takes[None].include(block.imports))
+#                 mt = last_makes[id(block)].add(last_makes[None].include(block.exports))
+#
+#                 t = count.takes_ips(lt, lm)
+#                 takes[None].add(t.include(block.imports))
+#                 takes[id(block)].add(t.exclude(block.imports))
+#
+#                 m = count.makes_ips(lt, lm)
+#                 makes[None].add(m.include(block.exports))
+#                 makes[id(block)].add(m.exclude(block.exports))
