@@ -169,20 +169,30 @@ class Vec[I]:
     def exclude(self, items: Set[I]) -> Vec[I]:
         return Vec(self.ty, {i: v for (i, v) in self.data.items() if i not in items})
 
+    def lte(self, other: Vec[I]) -> bool:
+        return all(self[i] <= other[i] for i in self.data) and all(
+            self[i] <= other[i] for i in other.data
+        )
+
+    def neq(self, other: Vec[I]) -> bool:
+        return any(self[i] != other[i] for i in self.data) or any(
+            self[i] != other[i] for i in other.data
+        )
+
 
 type Ivec = Vec[Item]
 
 
-def Izeros() -> Ivec:
+def izeros() -> Ivec:
     return Vec[Item].from_zeros(Item)
 
 
-def Ifrom(data: dict[Item, float]) -> Ivec:
+def ifrom(data: dict[Item, float]) -> Ivec:
     return Vec[Item](Item, data)
 
 
-def Isum(sequence: Sequence[Ivec]) -> Ivec:
-    return Ivec[Item].from_sum(Item, sequence)
+def isum(sequence: Sequence[Ivec]) -> Ivec:
+    return Vec[Item].from_sum(Item, sequence)
 
 
 @dataclass(frozen=True)
@@ -192,7 +202,7 @@ class TakeMake:
 
     @classmethod
     def from_zeros(cls):
-        return cls(Izeros(), Izeros())
+        return cls(izeros(), izeros())
 
 
 @dataclass(frozen=True)
@@ -222,8 +232,8 @@ class BaseBuilding:
         return cls(
             [
                 Crafting(
-                    take=Ifrom(take),
-                    make=Ifrom(make),
+                    take=ifrom(take),
+                    make=ifrom(make),
                     seconds=(short, long),
                 )
             ],
@@ -236,10 +246,21 @@ class BaseBuilding:
     def get_make_items(self) -> set[Item]:
         return {i for c in self.craftings for i in c.make.nonzero_items()}
 
-    def get_ips(self, takes: set[Item], makes: set[Item], speed: float) -> TakeMake:
+    def get_ips(
+        self,
+        take: Ivec | None,
+        make: Ivec | None,
+        takes: set[Item],
+        makes: set[Item],
+        speed: float,
+    ) -> TakeMake:
         dt = 0  # cycle duration seconds
-        tk = Izeros()  # cycle take items
-        mk = Izeros()  # cycle make items
+        tk = izeros()  # cycle take items
+        mk = izeros()  # cycle make items
+
+        # TODO soon
+        assert take is None
+        assert make is None
 
         for c in self.craftings:
             if (
@@ -257,16 +278,30 @@ class BaseBuilding:
         if dt > 0:
             return TakeMake(take=tk.sdiv(dt), make=mk.sdiv(dt))
 
-        return TakeMake(take=Izeros(), make=Izeros())
+        return TakeMake(take=izeros(), make=izeros())
 
-    def takes_ips(self, takes: set[Item], makes: set[Item], speed: float) -> Ivec:
-        return self.get_ips(takes, makes, speed).take
+    def takes_ips(
+        self,
+        take: Ivec | None,
+        make: Ivec | None,
+        takes: set[Item],
+        makes: set[Item],
+        speed: float,
+    ) -> Ivec:
+        return self.get_ips(take, make, takes, makes, speed).take
 
-    def makes_ips(self, takes: set[Item], makes: set[Item], speed: float) -> Ivec:
-        return self.get_ips(takes, makes, speed).make
+    def makes_ips(
+        self,
+        take: Ivec | None,
+        make: Ivec | None,
+        takes: set[Item],
+        makes: set[Item],
+        speed: float,
+    ) -> Ivec:
+        return self.get_ips(take, make, takes, makes, speed).make
 
     def representative_count_from_ips(self, item: Item, ips: float) -> float:
-        rep = self.get_ips(self.get_take_items(), self.get_make_items(), 1)
+        rep = self.get_ips(None, None, self.get_take_items(), self.get_make_items(), 1)
         match rep.make[item]:
             case 0:
                 return 0
@@ -281,11 +316,11 @@ class ConfiguredGenericBuilding:
     makes: set[Item]
     speed: float  # 0 -> worst speed, 1 -> best speed
 
-    def takes_ips(self) -> Ivec:
-        return self.building.takes_ips(self.takes, self.makes, self.speed)
+    def takes_ips(self, take: Ivec | None = None, make: Ivec | None = None) -> Ivec:
+        return self.building.takes_ips(take, make, self.takes, self.makes, self.speed)
 
-    def makes_ips(self) -> Ivec:
-        return self.building.makes_ips(self.takes, self.makes, self.speed)
+    def makes_ips(self, take: Ivec | None = None, make: Ivec | None = None) -> Ivec:
+        return self.building.makes_ips(take, make, self.takes, self.makes, self.speed)
 
 
 type Building = BaseBuilding
@@ -302,11 +337,11 @@ class BuildingCount:
         assert self.count >= 0
         assert 0 <= self.usage <= 1
 
-    def takes_ips(self) -> Ivec:
-        return self.building.takes_ips().smul(self.count * self.usage)
+    def takes_ips(self, take: Ivec | None = None, make: Ivec | None = None) -> Ivec:
+        return self.building.takes_ips(take, make).smul(self.count * self.usage)
 
-    def makes_ips(self) -> Ivec:
-        return self.building.makes_ips().smul(self.count * self.usage)
+    def makes_ips(self, take: Ivec | None = None, make: Ivec | None = None) -> Ivec:
+        return self.building.makes_ips(take, make).smul(self.count * self.usage)
 
 
 def extract_plain_timings(path: Path) -> tuple[float, float]:
@@ -383,18 +418,18 @@ def building_from_name(name: Bname) -> Building:
             return BaseBuilding(
                 [
                     Crafting(
-                        Ifrom({Item.barley: 1, Item.water: 1, Item.honey: 1}),
-                        Ifrom({Item.mead: 1}),
+                        ifrom({Item.barley: 1, Item.water: 1, Item.honey: 1}),
+                        ifrom({Item.mead: 1}),
                         (65.667, 65.667),
                     ),
                     Crafting(
-                        Ifrom({Item.barley: 1, Item.water: 1}),
-                        Ifrom({Item.beer: 1}),
+                        ifrom({Item.barley: 1, Item.water: 1}),
+                        ifrom({Item.beer: 1}),
                         (60.667, 60.667),
                     ),
                     Crafting(
-                        Ifrom({Item.barley: 1, Item.water: 1, Item.honey: 1}),
-                        Ifrom({Item.mead: 1}),
+                        ifrom({Item.barley: 1, Item.water: 1, Item.honey: 1}),
+                        ifrom({Item.mead: 1}),
                         (65.667, 65.667),
                     ),
                 ],
@@ -408,18 +443,18 @@ def building_from_name(name: Bname) -> Building:
             return BaseBuilding(
                 [
                     Crafting(
-                        Ifrom({Item.barley: 1, Item.water: 1, Item.honey: 1}),
-                        Ifrom({Item.honey_bread: 1}),
+                        ifrom({Item.barley: 1, Item.water: 1, Item.honey: 1}),
+                        ifrom({Item.honey_bread: 1}),
                         (45.667, 45.667),
                     ),
                     Crafting(
-                        Ifrom({Item.barley: 1, Item.water: 1}),
-                        Ifrom({Item.bread: 1}),
+                        ifrom({Item.barley: 1, Item.water: 1}),
+                        ifrom({Item.bread: 1}),
                         (40.667, 40.667),
                     ),
                     Crafting(
-                        Ifrom({Item.barley: 1, Item.water: 1, Item.honey: 1}),
-                        Ifrom({Item.honey_bread: 1}),
+                        ifrom({Item.barley: 1, Item.water: 1, Item.honey: 1}),
+                        ifrom({Item.honey_bread: 1}),
                         (45.667, 45.667),
                     ),
                 ],
@@ -433,13 +468,13 @@ def building_from_name(name: Bname) -> Building:
             return BaseBuilding(
                 [
                     Crafting(
-                        Ifrom({Item.fur_garment: 1, Item.iron: 1}),
-                        Ifrom({Item.studded_fur_garment: 1}),
+                        ifrom({Item.fur_garment: 1, Item.iron: 1}),
+                        ifrom({Item.studded_fur_garment: 1}),
                         (49, 49),
                     ),
                     Crafting(
-                        Ifrom({Item.fur_garment: 1, Item.iron: 1, Item.gold: 1}),
-                        Ifrom({Item.golden_fur_garment: 1}),
+                        ifrom({Item.fur_garment: 1, Item.iron: 1, Item.gold: 1}),
+                        ifrom({Item.golden_fur_garment: 1}),
                         (49, 49),
                     ),
                 ],
@@ -450,7 +485,7 @@ def building_from_name(name: Bname) -> Building:
             # TODO hm maybe could be extracted? timings at least
             return BaseBuilding(
                 craftings=[
-                    Crafting(Ifrom({Item.iron: 1, Item.log: 1}), Ifrom({i: 1}), dt)
+                    Crafting(ifrom({Item.iron: 1, Item.log: 1}), ifrom({i: 1}), dt)
                     for i in {
                         Item.pick,
                         Item.felling_axe,
@@ -463,14 +498,14 @@ def building_from_name(name: Bname) -> Building:
                     }
                 ]
                 + [
-                    Crafting(Ifrom({Item.iron: 1}), Ifrom({Item.needles: 2}), dt),
+                    Crafting(ifrom({Item.iron: 1}), ifrom({Item.needles: 2}), dt),
                     Crafting(
-                        Ifrom({Item.reed: 1, Item.log: 1}),
-                        Ifrom({Item.basket: 1}),
+                        ifrom({Item.reed: 1, Item.log: 1}),
+                        ifrom({Item.basket: 1}),
                         dt,
                     ),
-                    Crafting(Ifrom({Item.iron: 1}), Ifrom({Item.fire_tongs: 1}), dt),
-                    Crafting(Ifrom({Item.reed: 2}), Ifrom({Item.fishing_net: 1}), dt),
+                    Crafting(ifrom({Item.iron: 1}), ifrom({Item.fire_tongs: 1}), dt),
+                    Crafting(ifrom({Item.reed: 2}), ifrom({Item.fishing_net: 1}), dt),
                 ],
                 pause=10,
             )
@@ -482,47 +517,47 @@ def building_from_name(name: Bname) -> Building:
             return BaseBuilding(
                 craftings=[
                     Crafting(
-                        Ifrom({Item.fruit: 1}),
-                        Ifrom({Item.ration: 1}),
+                        ifrom({Item.fruit: 1}),
+                        ifrom({Item.ration: 1}),
                         (55, 55),
                         unless={Item.smoked_fish, Item.smoked_meat},
                     ),
                     Crafting(
-                        Ifrom({Item.bread: 1}),
-                        Ifrom({Item.ration: 1}),
+                        ifrom({Item.bread: 1}),
+                        ifrom({Item.ration: 1}),
                         (55, 55),
                         unless={Item.smoked_fish, Item.smoked_meat},
                     ),
                     Crafting(
-                        Ifrom({Item.smoked_fish: 1}),
-                        Ifrom({Item.ration: 1}),
+                        ifrom({Item.smoked_fish: 1}),
+                        ifrom({Item.ration: 1}),
                         (55, 55),
                         unless={Item.fruit, Item.bread},
                     ),
                     Crafting(
-                        Ifrom({Item.smoked_meat: 1}),
-                        Ifrom({Item.ration: 1}),
+                        ifrom({Item.smoked_meat: 1}),
+                        ifrom({Item.ration: 1}),
                         (55, 55),
                         unless={Item.fruit, Item.bread},
                     ),
                     Crafting(
-                        Ifrom({Item.fruit: 1, Item.smoked_fish: 1}),
-                        Ifrom({Item.ration: 2}),
+                        ifrom({Item.fruit: 1, Item.smoked_fish: 1}),
+                        ifrom({Item.ration: 2}),
                         (74, 74),
                     ),
                     Crafting(
-                        Ifrom({Item.fruit: 1, Item.smoked_meat: 1}),
-                        Ifrom({Item.ration: 2}),
+                        ifrom({Item.fruit: 1, Item.smoked_meat: 1}),
+                        ifrom({Item.ration: 2}),
                         (74, 74),
                     ),
                     Crafting(
-                        Ifrom({Item.bread: 1, Item.smoked_fish: 1}),
-                        Ifrom({Item.ration: 2}),
+                        ifrom({Item.bread: 1, Item.smoked_fish: 1}),
+                        ifrom({Item.ration: 2}),
                         (74, 74),
                     ),
                     Crafting(
-                        Ifrom({Item.bread: 1, Item.smoked_meat: 1}),
-                        Ifrom({Item.ration: 2}),
+                        ifrom({Item.bread: 1, Item.smoked_meat: 1}),
+                        ifrom({Item.ration: 2}),
                         (74, 74),
                     ),
                 ],
@@ -532,13 +567,13 @@ def building_from_name(name: Bname) -> Building:
             return BaseBuilding(
                 [
                     Crafting(
-                        Ifrom({Item.log: 1, Item.fish: 2}),
-                        Ifrom({Item.smoked_fish: 2}),
+                        ifrom({Item.log: 1, Item.fish: 2}),
+                        ifrom({Item.smoked_fish: 2}),
                         (54, 54),
                     ),
                     Crafting(
-                        Ifrom({Item.log: 1, Item.meat: 2}),
-                        Ifrom({Item.smoked_meat: 2}),
+                        ifrom({Item.log: 1, Item.meat: 2}),
+                        ifrom({Item.smoked_meat: 2}),
                         (54, 54),
                     ),
                 ],
@@ -548,18 +583,18 @@ def building_from_name(name: Bname) -> Building:
             return BaseBuilding(
                 [
                     Crafting(
-                        Ifrom({Item.coal: 1, Item.iron_ore: 1}),
-                        Ifrom({Item.iron: 1}),
+                        ifrom({Item.coal: 1, Item.iron_ore: 1}),
+                        ifrom({Item.iron: 1}),
                         (64, 64),
                     ),
                     Crafting(
-                        Ifrom({Item.coal: 1, Item.gold_ore: 1}),
-                        Ifrom({Item.gold: 1}),
+                        ifrom({Item.coal: 1, Item.gold_ore: 1}),
+                        ifrom({Item.gold: 1}),
                         (66, 66),
                     ),
                     Crafting(
-                        Ifrom({Item.coal: 1, Item.iron_ore: 1}),
-                        Ifrom({Item.iron: 1}),
+                        ifrom({Item.coal: 1, Item.iron_ore: 1}),
+                        ifrom({Item.iron: 1}),
                         (64, 64),
                     ),
                 ],
@@ -569,18 +604,18 @@ def building_from_name(name: Bname) -> Building:
             return BaseBuilding(
                 [
                     Crafting(
-                        Ifrom({Item.coal: 1, Item.iron: 1}),
-                        Ifrom({Item.short_sword: 1}),
+                        ifrom({Item.coal: 1, Item.iron: 1}),
+                        ifrom({Item.short_sword: 1}),
                         (58, 58),
                     ),
                     Crafting(
-                        Ifrom({Item.coal: 1, Item.iron: 2}),
-                        Ifrom({Item.long_sword: 1}),
+                        ifrom({Item.coal: 1, Item.iron: 2}),
+                        ifrom({Item.long_sword: 1}),
                         (58, 58),
                     ),
                     Crafting(
-                        Ifrom({Item.coal: 1, Item.iron: 1}),
-                        Ifrom({Item.helmet: 1}),
+                        ifrom({Item.coal: 1, Item.iron: 1}),
+                        ifrom({Item.helmet: 1}),
                         (68, 68),
                     ),
                 ],
@@ -590,28 +625,28 @@ def building_from_name(name: Bname) -> Building:
             return BaseBuilding(
                 [
                     Crafting(
-                        Ifrom({Item.coal: 1, Item.iron: 2, Item.gold: 1}),
-                        Ifrom({Item.broadsword: 1}),
+                        ifrom({Item.coal: 1, Item.iron: 2, Item.gold: 1}),
+                        ifrom({Item.broadsword: 1}),
                         (58.8, 58.8),
                     ),
                     Crafting(
-                        Ifrom({Item.coal: 2, Item.iron: 2, Item.gold: 1}),
-                        Ifrom({Item.double_edged_sword: 1}),
+                        ifrom({Item.coal: 2, Item.iron: 2, Item.gold: 1}),
+                        ifrom({Item.double_edged_sword: 1}),
                         (58.8, 58.8),
                     ),
                     Crafting(
-                        Ifrom({Item.coal: 2, Item.iron: 2, Item.gold: 1}),
-                        Ifrom({Item.golden_helmet: 1}),
+                        ifrom({Item.coal: 2, Item.iron: 2, Item.gold: 1}),
+                        ifrom({Item.golden_helmet: 1}),
                         (68.8, 68.8),
                     ),
                     Crafting(
-                        Ifrom({Item.coal: 1, Item.iron: 2, Item.gold: 1}),
-                        Ifrom({Item.broadsword: 1}),
+                        ifrom({Item.coal: 1, Item.iron: 2, Item.gold: 1}),
+                        ifrom({Item.broadsword: 1}),
                         (58.8, 58.8),
                     ),
                     Crafting(
-                        Ifrom({Item.coal: 2, Item.iron: 2, Item.gold: 1}),
-                        Ifrom({Item.double_edged_sword: 1}),
+                        ifrom({Item.coal: 2, Item.iron: 2, Item.gold: 1}),
+                        ifrom({Item.double_edged_sword: 1}),
                         (58.8, 58.8),
                     ),
                 ],
@@ -623,33 +658,33 @@ def building_from_name(name: Bname) -> Building:
             return BaseBuilding(
                 [
                     Crafting(
-                        Ifrom({Item.water: 1, Item.barley: 1}),
-                        Ifrom({Item.deer: 1}),
+                        ifrom({Item.water: 1, Item.barley: 1}),
+                        ifrom({Item.deer: 1}),
                         (30, 30),
                     ),
                     Crafting(
-                        Ifrom({Item.water: 1, Item.barley: 1}),
-                        Ifrom({Item.fur: 1}),
+                        ifrom({Item.water: 1, Item.barley: 1}),
+                        ifrom({Item.fur: 1}),
                         (38.6, 38.6),
                     ),
                     Crafting(
-                        Ifrom({Item.water: 1, Item.barley: 1}),
-                        Ifrom({Item.deer: 1}),
+                        ifrom({Item.water: 1, Item.barley: 1}),
+                        ifrom({Item.deer: 1}),
                         (30, 30),
                     ),
                     Crafting(
-                        Ifrom({Item.water: 1, Item.barley: 1}),
-                        Ifrom({Item.fur: 1}),
+                        ifrom({Item.water: 1, Item.barley: 1}),
+                        ifrom({Item.fur: 1}),
                         (38.6, 38.6),
                     ),
                     Crafting(
-                        Ifrom({Item.water: 1, Item.barley: 1}),
-                        Ifrom({Item.deer: 1}),
+                        ifrom({Item.water: 1, Item.barley: 1}),
+                        ifrom({Item.deer: 1}),
                         (30, 30),
                     ),
                     Crafting(
-                        Ifrom({Item.water: 1, Item.barley: 1}),
-                        Ifrom({Item.fur: 1, Item.meat: 1}),
+                        ifrom({Item.water: 1, Item.barley: 1}),
+                        ifrom({Item.fur: 1, Item.meat: 1}),
                         (42.2, 42.2),
                     ),
                 ],
@@ -668,32 +703,32 @@ def building_from_name(name: Bname) -> Building:
                     Crafting(
                         # TODO hmm ok just one of many foods ... dont have a good way to model it
                         # and which one would be taken, random uniform, always first?
-                        Ifrom({Item.long_sword: 1, food: 1}),
-                        Ifrom({Item.scrap_iron: 1}),
+                        ifrom({Item.long_sword: 1, food: 1}),
+                        ifrom({Item.scrap_iron: 1}),
                         (36 + 6, 36 + 6),  # NOTE not sure about the +6
                     )
                     for food in {Item.bread, Item.smoked_fish, Item.smoked_meat}
                 ]
                 + [  # attack 2
                     Crafting(
-                        Ifrom({Item.broadsword: 1, Item.bread: 1, meat: 1}),
-                        Ifrom({Item.scrap_iron: 2}),
+                        ifrom({Item.broadsword: 1, Item.bread: 1, meat: 1}),
+                        ifrom({Item.scrap_iron: 2}),
                         (36 + 6, 36 + 6),  # NOTE not sure about the +6
                     )
                     for meat in {Item.smoked_fish, Item.smoked_meat}
                 ]
                 + [  # attack 3
                     Crafting(
-                        Ifrom({Item.double_edged_sword: 1, Item.beer: 1, meat: 1}),
-                        Ifrom({Item.scrap_iron: 1, Item.mixed_scrap_metal: 1}),
+                        ifrom({Item.double_edged_sword: 1, Item.beer: 1, meat: 1}),
+                        ifrom({Item.scrap_iron: 1, Item.mixed_scrap_metal: 1}),
                         (36 + 6, 36 + 6),  # NOTE not sure about the +6
                     )
                     for meat in {Item.smoked_fish, Item.smoked_meat}
                 ]
                 + [  # health 1
                     Crafting(
-                        Ifrom({Item.helmet: 1, food1: 1, food2: 1}),
-                        Ifrom({}),
+                        ifrom({Item.helmet: 1, food1: 1, food2: 1}),
+                        ifrom({}),
                         (36 + 6, 36 + 6),  # NOTE not sure about the +6
                     )
                     for food1 in {Item.bread, Item.beer}
@@ -701,8 +736,8 @@ def building_from_name(name: Bname) -> Building:
                 ]
                 + [  # defense 1
                     Crafting(
-                        Ifrom({Item.studded_fur_garment: 1, food1: 1, food2: 1}),
-                        Ifrom({Item.old_fur_garment: 1}),
+                        ifrom({Item.studded_fur_garment: 1, food1: 1, food2: 1}),
+                        ifrom({Item.old_fur_garment: 1}),
                         (36 + 6, 36 + 6),  # NOTE not sure about the +6
                     )
                     for food1 in {Item.bread, Item.beer}
@@ -715,8 +750,8 @@ def building_from_name(name: Bname) -> Building:
             return BaseBuilding(
                 [  # attack 4
                     Crafting(
-                        Ifrom({Item.long_sword: 1, food1: 1, food2: 1}),
-                        Ifrom({}),
+                        ifrom({Item.long_sword: 1, food1: 1, food2: 1}),
+                        ifrom({}),
                         (28.8 + 6, 28.8 + 6),  # NOTE not sure about the +6
                     )
                     for food1 in {Item.honey_bread, Item.mead}
@@ -725,8 +760,8 @@ def building_from_name(name: Bname) -> Building:
                 + [  # attack 5
                     Crafting(
                         # TODO not clear of food2 is two of the same, or any two ...
-                        Ifrom({Item.broadsword: 1, food1: 1, food2: 2}),
-                        Ifrom({Item.scrap_iron: 2}),
+                        ifrom({Item.broadsword: 1, food1: 1, food2: 2}),
+                        ifrom({Item.scrap_iron: 2}),
                         (28.8 + 6, 28.8 + 6),  # NOTE not sure about the +6
                     )
                     for food1 in {Item.honey_bread, Item.mead}
@@ -734,7 +769,7 @@ def building_from_name(name: Bname) -> Building:
                 ]
                 + [  # attack 6
                     Crafting(
-                        Ifrom(
+                        ifrom(
                             {
                                 Item.double_edged_sword: 1,
                                 Item.honey_bread: 1,
@@ -742,15 +777,15 @@ def building_from_name(name: Bname) -> Building:
                                 food: 1,
                             }
                         ),
-                        Ifrom({Item.scrap_iron: 1, Item.mixed_scrap_metal: 1}),
+                        ifrom({Item.scrap_iron: 1, Item.mixed_scrap_metal: 1}),
                         (28.8 + 6, 28.8 + 6),  # NOTE not sure about the +6
                     )
                     for food in {Item.smoked_fish, Item.smoked_meat}
                 ]
                 + [  # defense 2
                     Crafting(
-                        Ifrom({Item.golden_fur_garment: 1, food1: 1, food2: 1}),
-                        Ifrom({Item.scrap_iron: 1, Item.old_fur_garment: 1}),
+                        ifrom({Item.golden_fur_garment: 1, food1: 1, food2: 1}),
+                        ifrom({Item.scrap_iron: 1, Item.old_fur_garment: 1}),
                         (36 + 6, 36 + 6),  # NOTE not sure about the +6
                     )
                     for food1 in {Item.honey_bread, Item.mead}
@@ -758,8 +793,8 @@ def building_from_name(name: Bname) -> Building:
                 ]
                 + [  # health 2
                     Crafting(
-                        Ifrom({Item.golden_helmet: 1, food1: 1, food2: 1}),
-                        Ifrom({Item.scrap_iron: 1}),
+                        ifrom({Item.golden_helmet: 1, food1: 1, food2: 1}),
+                        ifrom({Item.scrap_iron: 1}),
                         (32.4 + 6, 32.4 + 6),  # NOTE not sure about the +6
                     )
                     for food1 in {Item.honey_bread, Item.mead}
@@ -779,11 +814,11 @@ def get_buildings() -> Mapping[Bname, Building]:
 
 
 def get_takes_ips(buildings: list[BuildingCount]) -> Ivec:
-    return Isum([b.takes_ips() for b in buildings])
+    return isum([b.takes_ips() for b in buildings])
 
 
 def get_makes_ips(buildings: list[BuildingCount]) -> Ivec:
-    return Isum([b.makes_ips() for b in buildings])
+    return isum([b.makes_ips() for b in buildings])
 
 
 def get_balance_ips(buildings: list[BuildingCount]) -> Ivec:
@@ -835,16 +870,16 @@ def get_block_balance(block: Block) -> BlockBalance:
         else:
             local[i] = b
     return BlockBalance(
-        imports=Ifrom(imports),
-        local=Ifrom(local),
-        exports=Ifrom(exports),
+        imports=ifrom(imports),
+        local=ifrom(local),
+        exports=ifrom(exports),
     )
 
 
 def get_global_balance(blocks: list[BlockBalance]) -> Ivec:
     imports = [b.imports.negate() for b in blocks]
     exports = [b.exports for b in blocks]
-    return Isum(imports + exports)
+    return isum(imports + exports)
 
 
 def building_count_from_ips(item: Item, ips: float) -> list[tuple[Bname, float]]:
@@ -857,8 +892,31 @@ def building_count_from_ips(item: Item, ips: float) -> list[tuple[Bname, float]]
     return counts
 
 
-def wip():
-    vec: Vec[tuple[int | None, Item]]
+def wip(blocks: list[Block]):
+    # TODO init with last solution?
+    take: Ivec | None = None
+    last_take: Ivec | None = None
+    make: Ivec | None = None
+    last_make: Ivec | None = None
+
+    # TODO max iter count
+    while (
+        take is None
+        or make is None
+        or last_take is None
+        or last_make is None
+        or last_take.neq(take)
+        or last_make.neq(make)
+    ):
+        last_take, last_make = take, make
+        take, make = izeros(), izeros()
+        for block in blocks:
+            for count in block.buildings:
+                take = take.add(count.takes_ips(last_take, last_make))
+                make = make.add(count.makes_ips(last_take, last_make))
+
+    # TODO or close enough
+    assert take.lte(make)
 
 
 # def get_balance(blocks: list[Block]) -> None:
