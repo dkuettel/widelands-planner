@@ -30,6 +30,7 @@ class Item(StrEnum):
     beer = "beer"
     iron_ore = "iron ore"
     iron = "iron"
+    scrap_iron = "scrap iron"
     gold_ore = "gold ore"
     gold = "gold"
     short_sword = "short sword"
@@ -48,8 +49,18 @@ class Item(StrEnum):
     fire_tongs = "fire tongs"
     fishing_net = "fishing net"
     fur_garment = "fur garment"
+    old_fur_garment = "old fur garment"
+    studded_fur_garment = "studded fur garment"
+    golden_fur_garment = "golden fur garment"
     deer = "deer"
     fur = "fur"
+    broadsword = "broadsword"
+    double_edged_sword = "double-edged sword"
+    golden_helmet = "golden helmet"
+    mixed_scrap_metal = "mixed scrap metal"
+    honey_bread = "honey bread"
+    mead = "mead"
+    honey = "honey"
 
 
 def get_items() -> list[Item]:
@@ -73,15 +84,22 @@ class Bname(StrEnum):
     brick_kiln = "brick kilns"
     collectors_house = "fruit collector's houses"
     berry_farm = "berry farms"
+    beekeepers_house = "beekeeper's houses"
     brewery = "breweries"
     bakery = "bakeries"
+    honey_bread_bakery = "honey bread bakeries"
     ironmine = "iron mines"
     furnace = "furnaces"
-    small_armor_smithy = "small armor smithies"
+    armor_smithy_small = "small armor smithies"
+    armor_smithy_large = "large armor smithies"
     blacksmithy = "blacksmithies"
     barracks = "barracks"
     reindeer_farm = "reindeer farms"
-    sewing_room = "sewing room"
+    sewing_room = "sewing rooms"
+    tailors_shop = "tailor's shops"
+    goldmine = "gold mines"
+    training_camp = "training camps"
+    training_arena = "training arenas"
 
 
 @dataclass(frozen=True)
@@ -164,6 +182,8 @@ class Crafting:
     take: Ivec
     make: Ivec
     seconds: tuple[float, float]  # (short, long)
+    # TODO this also doesnt quite model if one entry is a bit lower than needed
+    # then we will flip flop between the two modes
     unless: None | set[Item] = None  # skip this crafting when these items are available
 
     def __post_init__(self):
@@ -320,22 +340,71 @@ def building_from_name(name: Bname) -> Building:
         case Bname.ironmine:
             # TODO different when depleted
             return b({Item.ration: 1}, {Item.iron_ore: 1})
+        case Bname.goldmine:
+            # TODO different when depleted
+            return b({Item.ration: 1}, {Item.gold_ore: 1})
         case Bname.clay_pit:
             return b({Item.water: 1}, {Item.clay: 1})
         case Bname.brick_kiln:
             return b({Item.coal: 1, Item.clay: 3, Item.granite: 1}, {Item.brick: 3})
         case Bname.collectors_house:
             return b({Item.berry_bush: 1}, {Item.fruit: 1})
+        case Bname.beekeepers_house:
+            # TODO not quite, not the same bush as collector, right?
+            # hmm they just have to be there, so if the collectors are too
+            # many its a problem? not clear, maybe while growing they are good too?
+            # workers/frisians/beekeeper/init.lua says "attrib:flowering"
+            # flowering seems to be before ripe, so maybe we need 0 berry_bush production
+            return b({Item.berry_bush: 0.1}, {Item.honey: 1})
         case Bname.berry_farm:
             return b({}, {Item.berry_bush: 1})
         case Bname.brewery:
             return b({Item.barley: 1, Item.water: 1}, {Item.beer: 1})
         case Bname.bakery:
             return b({Item.barley: 1, Item.water: 1}, {Item.bread: 1})
+        case Bname.honey_bread_bakery:
+            # TODO normal bread a bit faster here (10%)
+            # but it has two workers, does it mean running 2 worker programs?
+            return BaseBuilding(
+                [
+                    Crafting(
+                        Ivec({Item.barley: 1, Item.water: 1, Item.honey: 1}),
+                        Ivec({Item.honey_bread: 1}),
+                        (45.667, 45.667),
+                    ),
+                    Crafting(
+                        Ivec({Item.barley: 1, Item.water: 1}),
+                        Ivec({Item.bread: 1}),
+                        (40.667, 40.667),
+                    ),
+                    Crafting(
+                        Ivec({Item.barley: 1, Item.water: 1, Item.honey: 1}),
+                        Ivec({Item.honey_bread: 1}),
+                        (45.667, 45.667),
+                    ),
+                ],
+                10,
+            )
         case Bname.barracks:
             return b({Item.fur_garment: 1, Item.short_sword: 1}, {})
         case Bname.sewing_room:
             return b({Item.fur: 2}, {Item.fur_garment: 1})
+        case Bname.tailors_shop:
+            return BaseBuilding(
+                [
+                    Crafting(
+                        Ivec({Item.fur_garment: 1, Item.iron: 1}),
+                        Ivec({Item.studded_fur_garment: 1}),
+                        (49, 49),
+                    ),
+                    Crafting(
+                        Ivec({Item.fur_garment: 1, Item.iron: 1, Item.gold: 1}),
+                        Ivec({Item.golden_fur_garment: 1}),
+                        (49, 49),
+                    ),
+                ],
+                10,
+            )
         case Bname.blacksmithy:
             dt = (70.167, 70.167)
             # TODO hm maybe could be extracted? timings at least
@@ -366,6 +435,10 @@ def building_from_name(name: Bname) -> Building:
                 pause=10,
             )
         case Bname.tavern:
+            # TODO here we wrote all combinations
+            # does it really model the right thing in a total cycle?
+            # if consumed uniformly?
+            # this part could be coded? but not clear how we model a full cycle
             return BaseBuilding(
                 craftings=[
                     Crafting(
@@ -452,7 +525,7 @@ def building_from_name(name: Bname) -> Building:
                 ],
                 0,
             )
-        case Bname.small_armor_smithy:
+        case Bname.armor_smithy_small:
             return BaseBuilding(
                 [
                     Crafting(
@@ -469,6 +542,37 @@ def building_from_name(name: Bname) -> Building:
                         Ivec({Item.coal: 1, Item.iron: 1}),
                         Ivec({Item.helmet: 1}),
                         (68, 68),
+                    ),
+                ],
+                10,
+            )
+        case Bname.armor_smithy_large:
+            return BaseBuilding(
+                [
+                    Crafting(
+                        Ivec({Item.coal: 1, Item.iron: 2, Item.gold: 1}),
+                        Ivec({Item.broadsword: 1}),
+                        (58.8, 58.8),
+                    ),
+                    Crafting(
+                        Ivec({Item.coal: 2, Item.iron: 2, Item.gold: 1}),
+                        Ivec({Item.double_edged_sword: 1}),
+                        (58.8, 58.8),
+                    ),
+                    Crafting(
+                        Ivec({Item.coal: 2, Item.iron: 2, Item.gold: 1}),
+                        Ivec({Item.golden_helmet: 1}),
+                        (68.8, 68.8),
+                    ),
+                    Crafting(
+                        Ivec({Item.coal: 1, Item.iron: 2, Item.gold: 1}),
+                        Ivec({Item.broadsword: 1}),
+                        (58.8, 58.8),
+                    ),
+                    Crafting(
+                        Ivec({Item.coal: 2, Item.iron: 2, Item.gold: 1}),
+                        Ivec({Item.double_edged_sword: 1}),
+                        (58.8, 58.8),
                     ),
                 ],
                 10,
@@ -508,6 +612,118 @@ def building_from_name(name: Bname) -> Building:
                         Ivec({Item.fur: 1, Item.meat: 1}),
                         (42.2, 42.2),
                     ),
+                ],
+                0,
+            )
+        case Bname.training_camp:
+            # TODO timings not quite clear here, or order
+            # plus hard to say what is happening when we dont know
+            # what level soldiers are available in the queue
+            # unless you limit it to only one kind of equipment?
+            # but then what if all soldiers are stuck
+            # do they leave when max, or when no chance to update more?
+            # TODO also not modeling soldier production, how to treat them?
+            return BaseBuilding(
+                [  # attack 1
+                    Crafting(
+                        # TODO hmm ok just one of many foods ... dont have a good way to model it
+                        # and which one would be taken, random uniform, always first?
+                        Ivec({Item.long_sword: 1, food: 1}),
+                        Ivec({Item.scrap_iron: 1}),
+                        (36 + 6, 36 + 6),  # NOTE not sure about the +6
+                    )
+                    for food in {Item.bread, Item.smoked_fish, Item.smoked_meat}
+                ]
+                + [  # attack 2
+                    Crafting(
+                        Ivec({Item.broadsword: 1, Item.bread: 1, meat: 1}),
+                        Ivec({Item.scrap_iron: 2}),
+                        (36 + 6, 36 + 6),  # NOTE not sure about the +6
+                    )
+                    for meat in {Item.smoked_fish, Item.smoked_meat}
+                ]
+                + [  # attack 3
+                    Crafting(
+                        Ivec({Item.double_edged_sword: 1, Item.beer: 1, meat: 1}),
+                        Ivec({Item.scrap_iron: 1, Item.mixed_scrap_metal: 1}),
+                        (36 + 6, 36 + 6),  # NOTE not sure about the +6
+                    )
+                    for meat in {Item.smoked_fish, Item.smoked_meat}
+                ]
+                + [  # health 1
+                    Crafting(
+                        Ivec({Item.helmet: 1, food1: 1, food2: 1}),
+                        Ivec({}),
+                        (36 + 6, 36 + 6),  # NOTE not sure about the +6
+                    )
+                    for food1 in {Item.bread, Item.beer}
+                    for food2 in {Item.smoked_fish, Item.smoked_meat}
+                ]
+                + [  # defense 1
+                    Crafting(
+                        Ivec({Item.studded_fur_garment: 1, food1: 1, food2: 1}),
+                        Ivec({Item.old_fur_garment: 1}),
+                        (36 + 6, 36 + 6),  # NOTE not sure about the +6
+                    )
+                    for food1 in {Item.bread, Item.beer}
+                    for food2 in {Item.smoked_fish, Item.smoked_meat}
+                ],
+                0,
+            )
+        case Bname.training_arena:
+            # TODO same as for training camp
+            return BaseBuilding(
+                [  # attack 4
+                    Crafting(
+                        Ivec({Item.long_sword: 1, food1: 1, food2: 1}),
+                        Ivec({}),
+                        (28.8 + 6, 28.8 + 6),  # NOTE not sure about the +6
+                    )
+                    for food1 in {Item.honey_bread, Item.mead}
+                    for food2 in {Item.smoked_fish, Item.smoked_meat}
+                ]
+                + [  # attack 5
+                    Crafting(
+                        # TODO not clear of food2 is two of the same, or any two ...
+                        Ivec({Item.broadsword: 1, food1: 1, food2: 2}),
+                        Ivec({Item.scrap_iron: 2}),
+                        (28.8 + 6, 28.8 + 6),  # NOTE not sure about the +6
+                    )
+                    for food1 in {Item.honey_bread, Item.mead}
+                    for food2 in {Item.smoked_fish, Item.smoked_meat}
+                ]
+                + [  # attack 6
+                    Crafting(
+                        Ivec(
+                            {
+                                Item.double_edged_sword: 1,
+                                Item.honey_bread: 1,
+                                Item.mead: 1,
+                                food: 1,
+                            }
+                        ),
+                        Ivec({Item.scrap_iron: 1, Item.mixed_scrap_metal: 1}),
+                        (28.8 + 6, 28.8 + 6),  # NOTE not sure about the +6
+                    )
+                    for food in {Item.smoked_fish, Item.smoked_meat}
+                ]
+                + [  # defense 2
+                    Crafting(
+                        Ivec({Item.golden_fur_garment: 1, food1: 1, food2: 1}),
+                        Ivec({Item.scrap_iron: 1, Item.old_fur_garment: 1}),
+                        (36 + 6, 36 + 6),  # NOTE not sure about the +6
+                    )
+                    for food1 in {Item.honey_bread, Item.mead}
+                    for food2 in {Item.smoked_fish, Item.smoked_meat}
+                ]
+                + [  # health 2
+                    Crafting(
+                        Ivec({Item.golden_helmet: 1, food1: 1, food2: 1}),
+                        Ivec({Item.scrap_iron: 1}),
+                        (32.4 + 6, 32.4 + 6),  # NOTE not sure about the +6
+                    )
+                    for food1 in {Item.honey_bread, Item.mead}
+                    for food2 in {Item.smoked_fish, Item.smoked_meat}
                 ],
                 0,
             )
