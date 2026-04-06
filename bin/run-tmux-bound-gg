@@ -1,4 +1,4 @@
 #!/usr/bin/env zsh
 set -eu -o pipefail
 
-tmux new-window iloop run -- run
+tmux new-window nd env run iloop run -- run
