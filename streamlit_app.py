@@ -464,6 +464,11 @@ def main():
                                 label_visibility="collapsed",
                                 width=150,
                             )
+                            # TODO show here utilization, and a mark if more needed
+                            # maybe bold if potentially too much, not if exporting!
+                            # utilization is total usage / production, we should have that now
+                            # but what if there is more than one producing items of it?
+                            # what if it produces more than one item?
                             st.selectbox(
                                 "building",
                                 bnames,
