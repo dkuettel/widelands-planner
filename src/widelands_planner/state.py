@@ -86,6 +86,7 @@ class Bname(StrEnum):
     berry_farm = "berry farms"
     beekeepers_house = "beekeeper's houses"
     brewery = "breweries"
+    mead_brewery = "breweries"
     bakery = "bakeries"
     honey_bread_bakery = "honey bread bakeries"
     ironmine = "iron mines"
@@ -360,6 +361,27 @@ def building_from_name(name: Bname) -> Building:
             return b({}, {Item.berry_bush: 1})
         case Bname.brewery:
             return b({Item.barley: 1, Item.water: 1}, {Item.beer: 1})
+        case Bname.mead_brewery:
+            return BaseBuilding(
+                [
+                    Crafting(
+                        Ivec({Item.barley: 1, Item.water: 1, Item.honey: 1}),
+                        Ivec({Item.mead: 1}),
+                        (65.667, 65.667),
+                    ),
+                    Crafting(
+                        Ivec({Item.barley: 1, Item.water: 1}),
+                        Ivec({Item.mead: 1}),
+                        (40.667, 40.667),
+                    ),
+                    Crafting(
+                        Ivec({Item.barley: 1, Item.water: 1}),
+                        Ivec({Item.beer: 1}),
+                        (60.667, 60.667),
+                    ),
+                ],
+                10,
+            )
         case Bname.bakery:
             return b({Item.barley: 1, Item.water: 1}, {Item.bread: 1})
         case Bname.honey_bread_bakery:
