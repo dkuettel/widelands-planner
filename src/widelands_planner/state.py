@@ -937,6 +937,8 @@ def wip(blocks: list[Block]) -> tuple[Ivec, Ivec]:
             # but that maybe doesnt always make sense?
             or not last_take.almost_equal(take, 0.1 / 60)
             or not last_make.almost_equal(make, 0.1 / 60)
+            # TODO there also has to be more logic to stop when no changes left
+            # if we try to consume more trees than there are, we go to max iter
         ):
             break
         last_take, last_make = take, make
