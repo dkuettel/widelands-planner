@@ -407,6 +407,24 @@ def main():
     bnames = sorted(state.Bname)
     items = state.get_items()
 
+    blocks: list[state.Block] = []
+    for block in session.blocks:
+        imports = block.imports.get(set())
+        counts = [get_state_block_count(buildings, count) for count in block.counts]
+        exports = block.exports.get(set())
+        blocks.append(state.Block(imports, counts, exports))
+    take, make = state.wip(blocks)
+    st.subheader("take")
+    st_ivec(take, hints=False)
+    st.subheader("make")
+    st_ivec(make, hints=False)
+    # TODO ok kinda works, but logic when not enough input is still a bit wrong
+    # either way, want to fix that, want to add utilization to buildings
+    # and show them, still all global, see if it makes sense, and allows
+    # for more flexible modeling
+    # then add warnings to keep blocks isolated, but that is not really
+    # changing the optimization, its just an after the fact analysis
+
     with st.sidebar:
         st.subheader("global balance")
         with st.container(gap=None):

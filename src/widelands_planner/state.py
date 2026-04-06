@@ -179,6 +179,15 @@ class Vec[I]:
             self[i] != other[i] for i in other.data
         )
 
+    def almost_equal(self, other: Vec[I], eps: float) -> bool:
+        return all(abs(self[i] - other[i]) <= eps for i in self.data) or all(
+            abs(self[i] - other[i]) <= eps for i in other.data
+        )
+
+    def min(self) -> float:
+        # TODO very ambigous, and default too
+        return min(self.data.values(), default=0)
+
 
 type Ivec = Vec[Item]
 
@@ -258,10 +267,6 @@ class BaseBuilding:
         tk = izeros()  # cycle take items
         mk = izeros()  # cycle make items
 
-        # TODO soon
-        assert take is None
-        assert make is None
-
         for c in self.craftings:
             if (
                 takes >= c.take.nonzero_items()
@@ -275,10 +280,33 @@ class BaseBuilding:
 
         dt += self.pause
 
-        if dt > 0:
-            return TakeMake(take=tk.sdiv(dt), make=mk.sdiv(dt))
+        if dt == 0:
+            return TakeMake(take=izeros(), make=izeros())
 
-        return TakeMake(take=izeros(), make=izeros())
+        tk, mk = tk.sdiv(dt), mk.sdiv(dt)
+
+        if take is None and make is None:
+            return TakeMake(take=tk, make=mk)
+
+        # TODO easier once it comes in a dataclass
+        assert take is not None and make is not None
+
+        take = take.include(tk.nonzero_items())
+        make = make.include(tk.nonzero_items())
+
+        if take.lte(make):
+            return TakeMake(take=tk, make=mk)
+
+        # TODO very cheap now, just scaling
+        # but in reality, Craftings are quite complicated here
+        # need to roll it up from there
+        # TODO min is ambiguous, unlisted entries are meant to be zero, but we dont want them
+        # yet, if one entry becomes explicitely zero, then we do want it (plus, div is problematic anyway)
+        # look again at Vec semantics and distinguish between having a number and not? or always full? np then?
+        # in that case, going towards a polars dataframe?
+        ratio = make.div(take).min()
+
+        return TakeMake(take=tk.smul(ratio), make=mk.smul(ratio))
 
     def takes_ips(
         self,
@@ -892,31 +920,39 @@ def building_count_from_ips(item: Item, ips: float) -> list[tuple[Bname, float]]
     return counts
 
 
-def wip(blocks: list[Block]):
+def wip(blocks: list[Block]) -> tuple[Ivec, Ivec]:
     # TODO init with last solution?
     take: Ivec | None = None
     last_take: Ivec | None = None
     make: Ivec | None = None
     last_make: Ivec | None = None
 
-    # TODO max iter count
-    while (
-        take is None
-        or make is None
-        or last_take is None
-        or last_make is None
-        or last_take.neq(take)
-        or last_make.neq(make)
-    ):
+    for _ in range(100):
+        if not (
+            take is None
+            or make is None
+            or last_take is None
+            or last_make is None
+            # TODO 0.1 / 60 ... i want in ipm to be to one digit
+            # but that maybe doesnt always make sense?
+            or not last_take.almost_equal(take, 0.1 / 60)
+            or not last_make.almost_equal(make, 0.1 / 60)
+        ):
+            break
         last_take, last_make = take, make
         take, make = izeros(), izeros()
         for block in blocks:
             for count in block.buildings:
                 take = take.add(count.takes_ips(last_take, last_make))
                 make = make.add(count.makes_ips(last_take, last_make))
+    else:
+        print("too many iterations")
 
     # TODO or close enough
     assert take.lte(make)
+
+    # TODO really need a dataclass for this, so easy to flip
+    return take, make
 
 
 # def get_balance(blocks: list[Block]) -> None:
