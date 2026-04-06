@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import assert_never
 from uuid import uuid4
 
+import pandas as pd
 import streamlit as st
 
 from widelands_planner import state
@@ -209,25 +210,40 @@ def load_state(path: Path | None = None):
     st.session_state.update(state)
 
 
-def st_ivec(ivec: state.Ivec):
-    with st.container(gap=None):
-        for i, ips in ivec.sorted():
-            counts = state.building_count_from_ips(i, ips)
-            # TODO which representative to show?
-            [(_name, count), *_] = counts
-            if ips > 0:
-                if count >= 1:
-                    st.write(
-                        f"- {60 * ips:.1f} {i.value}/min (**{round(count * 100):+}%**)"
-                    )
-                else:
-                    st.write(
-                        f"- {60 * ips:.1f} {i.value}/min ({round(count * 100):+}%)"
-                    )
-            else:
-                st.write(
-                    f"- **{60 * ips:.1f} {i.value}/min ({round(count * 100):+}%)**"
-                )
+def st_ivec(ivec: state.Ivec, hints: bool):
+    def f(i: state.Item, ips: float) -> dict[str, str | float]:
+        counts = state.building_count_from_ips(i, ips)
+        # TODO which representative to show?
+        [(_name, count), *_] = counts
+        if not hints or ips >= 0:
+            return {
+                "item": f"{i}",
+                "i/min": 60 * ips,
+                "repr": count * 100,
+            }
+        return {
+            "item": f"{i} :warning:",
+            "i/min": 60 * ips,
+            "repr": count * 100,
+        }
+
+    df = pd.DataFrame([f(i, ips) for (i, ips) in ivec.sorted()])
+    # TODO polars is better, but styling doesnt work with st.table
+    # but we could just use polars to inject html? more control
+    # it just needs some work to fit into the streamlit visual design
+    st.table(  # pyright: ignore[reportUnknownMemberType]
+        df.style.format(
+            {
+                "i/min": "{:.1f}",
+                "repr": lambda v: (
+                    f"{v:.0f}%"
+                    if (not hints or v <= 100)  # pyright: ignore[reportOperatorIssue]
+                    else f"**{v:.0f}%**"
+                ),
+            }
+        ),
+        border="horizontal",
+    )
 
 
 def key_block_ids() -> str:
@@ -391,7 +407,7 @@ def main():
     with st.sidebar:
         st.subheader("global balance")
         with st.container(gap=None):
-            st_ivec(balance)
+            st_ivec(balance, hints=True)
         st.divider()
         st.button("add block", on_click=add_block)
         st.divider()
@@ -424,9 +440,9 @@ def main():
                             key=block.imports.key,
                             label_visibility="collapsed",
                         )
-                        st_ivec(block_balance.imports)
+                        st_ivec(block_balance.imports, hints=False)
                     with st.expander("local", expanded=True):
-                        st_ivec(block_balance.local)
+                        st_ivec(block_balance.local, hints=True)
                     with st.expander("exports", expanded=True):
                         st.multiselect(
                             "exports",
@@ -434,7 +450,7 @@ def main():
                             key=block.exports.key,
                             label_visibility="collapsed",
                         )
-                        st_ivec(block_balance.exports)
+                        st_ivec(block_balance.exports, hints=False)
                 with counts, st.container(horizontal=True, border=False):
                     for count_state in block.counts:
                         with st.container(width=250, border=True):
@@ -505,7 +521,6 @@ def main():
 # save all the time, keep a timeline? save version to load old stuff?
 # order buildings, by feed-into-order?
 # instead, say what blocks you want to import from? a map would almost be easier :) with a flow
-# a table might be better for balance?
 # long sword, in tight production, almost always skipped because it needs to iron, unfortunate dynamics
 # when gaming out a new addition, would be nice to see the diff until "confirmed", or todo add click checkboxes
 #    (almost like a new block, and then merge it in when done)
