@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import math
 import re
-from collections import defaultdict
 from collections.abc import Iterator, Mapping, Sequence, Set
 from dataclasses import dataclass
 from enum import StrEnum
@@ -106,74 +105,84 @@ class Bname(StrEnum):
 
 
 @dataclass(frozen=True)
-class Ivec:
+class Vec[I]:
+    ty: type[I]
     # TODO can we protect this dict from changes to be safe?
-    data: dict[Item, float]
+    data: dict[I, float]
 
     @classmethod
-    def from_zeros(cls):
-        return cls(dict())
+    def from_zeros(cls, ty: type[I]):
+        return Vec(ty, dict())
 
     @classmethod
-    def from_sum(cls, rates: Sequence[Ivec]):
+    def from_sum(cls, ty: type[I], rates: Sequence[Vec[I]]):
         items = {i for r in rates for i in r.data}
-        return cls({i: sum(r[i] for r in rates) for i in items})
+        return cls(ty, {i: sum(r[i] for r in rates) for i in items})
 
-    def sorted(self) -> Iterator[tuple[Item, float]]:
+    def sorted(self) -> Iterator[tuple[I, float]]:
         for k, v in sorted(self.data.items()):
             if v != 0:
                 yield (k, v)
 
-    def as_percentages(self) -> dict[str, float]:
-        def f(v: float) -> float:
-            if math.isfinite(v):
-                return round(v * 100)
-            return v
-
-        return {str(i): f(v) for (i, v) in self.data.items() if v != 0}
-
-    def __getitem__(self, i: Item) -> float:
+    def __getitem__(self, i: I) -> float:
         return self.data.get(i, 0)
 
-    def add(self, other: Ivec) -> Ivec:
+    def add(self, other: Vec[I]) -> Vec[I]:
         items = self.data.keys() | other.data.keys()
-        return Ivec({i: (self[i] + other[i]) for i in items})
+        return Vec(self.ty, {i: (self[i] + other[i]) for i in items})
 
-    def sub(self, other: Ivec) -> Ivec:
+    def sub(self, other: Vec[I]) -> Vec[I]:
         items = self.data.keys() | other.data.keys()
-        return Ivec({i: (self[i] - other[i]) for i in items})
+        return Vec(self.ty, {i: (self[i] - other[i]) for i in items})
 
-    def smul(self, s: float) -> Ivec:
-        return Ivec({i: s * v for (i, v) in self.data.items()})
+    def smul(self, s: float) -> Vec[I]:
+        return Vec(self.ty, {i: s * v for (i, v) in self.data.items()})
 
-    def sdiv(self, s: float) -> Ivec:
+    def sdiv(self, s: float) -> Vec[I]:
         return self.smul(1 / s)
 
-    def div(self, other: Ivec) -> Ivec:
+    def div(self, other: Vec[I]) -> Vec[I]:
         def div(a: float, b: float) -> float:
             if b == 0:
                 return math.inf
             return a / b
 
-        return Ivec({i: div(v, other[i]) for (i, v) in self.data.items() if v != 0})
+        return Vec(
+            self.ty, {i: div(v, other[i]) for (i, v) in self.data.items() if v != 0}
+        )
 
-    def negate(self) -> Ivec:
-        return Ivec({i: -v for (i, v) in self.data.items()})
+    def negate(self) -> Vec[I]:
+        return Vec(self.ty, {i: -v for (i, v) in self.data.items()})
 
-    def keep_positives(self) -> Ivec:
-        return Ivec({i: v for (i, v) in self.data.items() if v > 0})
+    def keep_positives(self) -> Vec[I]:
+        return Vec(self.ty, {i: v for (i, v) in self.data.items() if v > 0})
 
-    def nonzero_items(self) -> set[Item]:
+    def nonzero_items(self) -> set[I]:
         return {i for (i, v) in self.data.items() if v != 0}
 
     def is_zero(self) -> bool:
         return all(v == 0 for v in self.data.values())
 
-    def include(self, items: Set[Item]) -> Ivec:
-        return Ivec({i: v for (i, v) in self.data.items() if i in items})
+    def include(self, items: Set[I]) -> Vec[I]:
+        return Vec(self.ty, {i: v for (i, v) in self.data.items() if i in items})
 
-    def exclude(self, items: Set[Item]) -> Ivec:
-        return Ivec({i: v for (i, v) in self.data.items() if i not in items})
+    def exclude(self, items: Set[I]) -> Vec[I]:
+        return Vec(self.ty, {i: v for (i, v) in self.data.items() if i not in items})
+
+
+type Ivec = Vec[Item]
+
+
+def Ivec_zeros() -> Ivec:
+    return Vec[Item].from_zeros(Item)
+
+
+def Ivec_from(data: dict[Item, float]) -> Ivec:
+    return Vec[Item](Item, data)
+
+
+def Ivec_sum(sequence: Sequence[Ivec]) -> Ivec:
+    return Ivec[Item].from_sum(Item, sequence)
 
 
 @dataclass(frozen=True)
@@ -183,7 +192,7 @@ class TakeMake:
 
     @classmethod
     def from_zeros(cls):
-        return cls(Ivec.from_zeros(), Ivec.from_zeros())
+        return cls(Ivec_zeros(), Ivec_zeros())
 
 
 @dataclass(frozen=True)
@@ -213,8 +222,8 @@ class BaseBuilding:
         return cls(
             [
                 Crafting(
-                    take=Ivec(take),
-                    make=Ivec(make),
+                    take=Ivec_from(take),
+                    make=Ivec_from(make),
                     seconds=(short, long),
                 )
             ],
@@ -229,8 +238,8 @@ class BaseBuilding:
 
     def get_ips(self, takes: set[Item], makes: set[Item], speed: float) -> TakeMake:
         dt = 0  # cycle duration seconds
-        tk = Ivec.from_zeros()  # cycle take items
-        mk = Ivec.from_zeros()  # cycle make items
+        tk = Ivec_zeros()  # cycle take items
+        mk = Ivec_zeros()  # cycle make items
 
         for c in self.craftings:
             if (
@@ -248,7 +257,7 @@ class BaseBuilding:
         if dt > 0:
             return TakeMake(take=tk.sdiv(dt), make=mk.sdiv(dt))
 
-        return TakeMake(take=Ivec.from_zeros(), make=Ivec.from_zeros())
+        return TakeMake(take=Ivec_zeros(), make=Ivec_zeros())
 
     def takes_ips(self, takes: set[Item], makes: set[Item], speed: float) -> Ivec:
         return self.get_ips(takes, makes, speed).take
@@ -374,18 +383,18 @@ def building_from_name(name: Bname) -> Building:
             return BaseBuilding(
                 [
                     Crafting(
-                        Ivec({Item.barley: 1, Item.water: 1, Item.honey: 1}),
-                        Ivec({Item.mead: 1}),
+                        Ivec_from({Item.barley: 1, Item.water: 1, Item.honey: 1}),
+                        Ivec_from({Item.mead: 1}),
                         (65.667, 65.667),
                     ),
                     Crafting(
-                        Ivec({Item.barley: 1, Item.water: 1}),
-                        Ivec({Item.beer: 1}),
+                        Ivec_from({Item.barley: 1, Item.water: 1}),
+                        Ivec_from({Item.beer: 1}),
                         (60.667, 60.667),
                     ),
                     Crafting(
-                        Ivec({Item.barley: 1, Item.water: 1, Item.honey: 1}),
-                        Ivec({Item.mead: 1}),
+                        Ivec_from({Item.barley: 1, Item.water: 1, Item.honey: 1}),
+                        Ivec_from({Item.mead: 1}),
                         (65.667, 65.667),
                     ),
                 ],
@@ -399,18 +408,18 @@ def building_from_name(name: Bname) -> Building:
             return BaseBuilding(
                 [
                     Crafting(
-                        Ivec({Item.barley: 1, Item.water: 1, Item.honey: 1}),
-                        Ivec({Item.honey_bread: 1}),
+                        Ivec_from({Item.barley: 1, Item.water: 1, Item.honey: 1}),
+                        Ivec_from({Item.honey_bread: 1}),
                         (45.667, 45.667),
                     ),
                     Crafting(
-                        Ivec({Item.barley: 1, Item.water: 1}),
-                        Ivec({Item.bread: 1}),
+                        Ivec_from({Item.barley: 1, Item.water: 1}),
+                        Ivec_from({Item.bread: 1}),
                         (40.667, 40.667),
                     ),
                     Crafting(
-                        Ivec({Item.barley: 1, Item.water: 1, Item.honey: 1}),
-                        Ivec({Item.honey_bread: 1}),
+                        Ivec_from({Item.barley: 1, Item.water: 1, Item.honey: 1}),
+                        Ivec_from({Item.honey_bread: 1}),
                         (45.667, 45.667),
                     ),
                 ],
@@ -424,13 +433,13 @@ def building_from_name(name: Bname) -> Building:
             return BaseBuilding(
                 [
                     Crafting(
-                        Ivec({Item.fur_garment: 1, Item.iron: 1}),
-                        Ivec({Item.studded_fur_garment: 1}),
+                        Ivec_from({Item.fur_garment: 1, Item.iron: 1}),
+                        Ivec_from({Item.studded_fur_garment: 1}),
                         (49, 49),
                     ),
                     Crafting(
-                        Ivec({Item.fur_garment: 1, Item.iron: 1, Item.gold: 1}),
-                        Ivec({Item.golden_fur_garment: 1}),
+                        Ivec_from({Item.fur_garment: 1, Item.iron: 1, Item.gold: 1}),
+                        Ivec_from({Item.golden_fur_garment: 1}),
                         (49, 49),
                     ),
                 ],
@@ -441,7 +450,9 @@ def building_from_name(name: Bname) -> Building:
             # TODO hm maybe could be extracted? timings at least
             return BaseBuilding(
                 craftings=[
-                    Crafting(Ivec({Item.iron: 1, Item.log: 1}), Ivec({i: 1}), dt)
+                    Crafting(
+                        Ivec_from({Item.iron: 1, Item.log: 1}), Ivec_from({i: 1}), dt
+                    )
                     for i in {
                         Item.pick,
                         Item.felling_axe,
@@ -454,14 +465,20 @@ def building_from_name(name: Bname) -> Building:
                     }
                 ]
                 + [
-                    Crafting(Ivec({Item.iron: 1}), Ivec({Item.needles: 2}), dt),
                     Crafting(
-                        Ivec({Item.reed: 1, Item.log: 1}),
-                        Ivec({Item.basket: 1}),
+                        Ivec_from({Item.iron: 1}), Ivec_from({Item.needles: 2}), dt
+                    ),
+                    Crafting(
+                        Ivec_from({Item.reed: 1, Item.log: 1}),
+                        Ivec_from({Item.basket: 1}),
                         dt,
                     ),
-                    Crafting(Ivec({Item.iron: 1}), Ivec({Item.fire_tongs: 1}), dt),
-                    Crafting(Ivec({Item.reed: 2}), Ivec({Item.fishing_net: 1}), dt),
+                    Crafting(
+                        Ivec_from({Item.iron: 1}), Ivec_from({Item.fire_tongs: 1}), dt
+                    ),
+                    Crafting(
+                        Ivec_from({Item.reed: 2}), Ivec_from({Item.fishing_net: 1}), dt
+                    ),
                 ],
                 pause=10,
             )
@@ -473,47 +490,47 @@ def building_from_name(name: Bname) -> Building:
             return BaseBuilding(
                 craftings=[
                     Crafting(
-                        Ivec({Item.fruit: 1}),
-                        Ivec({Item.ration: 1}),
+                        Ivec_from({Item.fruit: 1}),
+                        Ivec_from({Item.ration: 1}),
                         (55, 55),
                         unless={Item.smoked_fish, Item.smoked_meat},
                     ),
                     Crafting(
-                        Ivec({Item.bread: 1}),
-                        Ivec({Item.ration: 1}),
+                        Ivec_from({Item.bread: 1}),
+                        Ivec_from({Item.ration: 1}),
                         (55, 55),
                         unless={Item.smoked_fish, Item.smoked_meat},
                     ),
                     Crafting(
-                        Ivec({Item.smoked_fish: 1}),
-                        Ivec({Item.ration: 1}),
+                        Ivec_from({Item.smoked_fish: 1}),
+                        Ivec_from({Item.ration: 1}),
                         (55, 55),
                         unless={Item.fruit, Item.bread},
                     ),
                     Crafting(
-                        Ivec({Item.smoked_meat: 1}),
-                        Ivec({Item.ration: 1}),
+                        Ivec_from({Item.smoked_meat: 1}),
+                        Ivec_from({Item.ration: 1}),
                         (55, 55),
                         unless={Item.fruit, Item.bread},
                     ),
                     Crafting(
-                        Ivec({Item.fruit: 1, Item.smoked_fish: 1}),
-                        Ivec({Item.ration: 2}),
+                        Ivec_from({Item.fruit: 1, Item.smoked_fish: 1}),
+                        Ivec_from({Item.ration: 2}),
                         (74, 74),
                     ),
                     Crafting(
-                        Ivec({Item.fruit: 1, Item.smoked_meat: 1}),
-                        Ivec({Item.ration: 2}),
+                        Ivec_from({Item.fruit: 1, Item.smoked_meat: 1}),
+                        Ivec_from({Item.ration: 2}),
                         (74, 74),
                     ),
                     Crafting(
-                        Ivec({Item.bread: 1, Item.smoked_fish: 1}),
-                        Ivec({Item.ration: 2}),
+                        Ivec_from({Item.bread: 1, Item.smoked_fish: 1}),
+                        Ivec_from({Item.ration: 2}),
                         (74, 74),
                     ),
                     Crafting(
-                        Ivec({Item.bread: 1, Item.smoked_meat: 1}),
-                        Ivec({Item.ration: 2}),
+                        Ivec_from({Item.bread: 1, Item.smoked_meat: 1}),
+                        Ivec_from({Item.ration: 2}),
                         (74, 74),
                     ),
                 ],
@@ -523,13 +540,13 @@ def building_from_name(name: Bname) -> Building:
             return BaseBuilding(
                 [
                     Crafting(
-                        Ivec({Item.log: 1, Item.fish: 2}),
-                        Ivec({Item.smoked_fish: 2}),
+                        Ivec_from({Item.log: 1, Item.fish: 2}),
+                        Ivec_from({Item.smoked_fish: 2}),
                         (54, 54),
                     ),
                     Crafting(
-                        Ivec({Item.log: 1, Item.meat: 2}),
-                        Ivec({Item.smoked_meat: 2}),
+                        Ivec_from({Item.log: 1, Item.meat: 2}),
+                        Ivec_from({Item.smoked_meat: 2}),
                         (54, 54),
                     ),
                 ],
@@ -539,18 +556,18 @@ def building_from_name(name: Bname) -> Building:
             return BaseBuilding(
                 [
                     Crafting(
-                        Ivec({Item.coal: 1, Item.iron_ore: 1}),
-                        Ivec({Item.iron: 1}),
+                        Ivec_from({Item.coal: 1, Item.iron_ore: 1}),
+                        Ivec_from({Item.iron: 1}),
                         (64, 64),
                     ),
                     Crafting(
-                        Ivec({Item.coal: 1, Item.gold_ore: 1}),
-                        Ivec({Item.gold: 1}),
+                        Ivec_from({Item.coal: 1, Item.gold_ore: 1}),
+                        Ivec_from({Item.gold: 1}),
                         (66, 66),
                     ),
                     Crafting(
-                        Ivec({Item.coal: 1, Item.iron_ore: 1}),
-                        Ivec({Item.iron: 1}),
+                        Ivec_from({Item.coal: 1, Item.iron_ore: 1}),
+                        Ivec_from({Item.iron: 1}),
                         (64, 64),
                     ),
                 ],
@@ -560,18 +577,18 @@ def building_from_name(name: Bname) -> Building:
             return BaseBuilding(
                 [
                     Crafting(
-                        Ivec({Item.coal: 1, Item.iron: 1}),
-                        Ivec({Item.short_sword: 1}),
+                        Ivec_from({Item.coal: 1, Item.iron: 1}),
+                        Ivec_from({Item.short_sword: 1}),
                         (58, 58),
                     ),
                     Crafting(
-                        Ivec({Item.coal: 1, Item.iron: 2}),
-                        Ivec({Item.long_sword: 1}),
+                        Ivec_from({Item.coal: 1, Item.iron: 2}),
+                        Ivec_from({Item.long_sword: 1}),
                         (58, 58),
                     ),
                     Crafting(
-                        Ivec({Item.coal: 1, Item.iron: 1}),
-                        Ivec({Item.helmet: 1}),
+                        Ivec_from({Item.coal: 1, Item.iron: 1}),
+                        Ivec_from({Item.helmet: 1}),
                         (68, 68),
                     ),
                 ],
@@ -581,28 +598,28 @@ def building_from_name(name: Bname) -> Building:
             return BaseBuilding(
                 [
                     Crafting(
-                        Ivec({Item.coal: 1, Item.iron: 2, Item.gold: 1}),
-                        Ivec({Item.broadsword: 1}),
+                        Ivec_from({Item.coal: 1, Item.iron: 2, Item.gold: 1}),
+                        Ivec_from({Item.broadsword: 1}),
                         (58.8, 58.8),
                     ),
                     Crafting(
-                        Ivec({Item.coal: 2, Item.iron: 2, Item.gold: 1}),
-                        Ivec({Item.double_edged_sword: 1}),
+                        Ivec_from({Item.coal: 2, Item.iron: 2, Item.gold: 1}),
+                        Ivec_from({Item.double_edged_sword: 1}),
                         (58.8, 58.8),
                     ),
                     Crafting(
-                        Ivec({Item.coal: 2, Item.iron: 2, Item.gold: 1}),
-                        Ivec({Item.golden_helmet: 1}),
+                        Ivec_from({Item.coal: 2, Item.iron: 2, Item.gold: 1}),
+                        Ivec_from({Item.golden_helmet: 1}),
                         (68.8, 68.8),
                     ),
                     Crafting(
-                        Ivec({Item.coal: 1, Item.iron: 2, Item.gold: 1}),
-                        Ivec({Item.broadsword: 1}),
+                        Ivec_from({Item.coal: 1, Item.iron: 2, Item.gold: 1}),
+                        Ivec_from({Item.broadsword: 1}),
                         (58.8, 58.8),
                     ),
                     Crafting(
-                        Ivec({Item.coal: 2, Item.iron: 2, Item.gold: 1}),
-                        Ivec({Item.double_edged_sword: 1}),
+                        Ivec_from({Item.coal: 2, Item.iron: 2, Item.gold: 1}),
+                        Ivec_from({Item.double_edged_sword: 1}),
                         (58.8, 58.8),
                     ),
                 ],
@@ -614,33 +631,33 @@ def building_from_name(name: Bname) -> Building:
             return BaseBuilding(
                 [
                     Crafting(
-                        Ivec({Item.water: 1, Item.barley: 1}),
-                        Ivec({Item.deer: 1}),
+                        Ivec_from({Item.water: 1, Item.barley: 1}),
+                        Ivec_from({Item.deer: 1}),
                         (30, 30),
                     ),
                     Crafting(
-                        Ivec({Item.water: 1, Item.barley: 1}),
-                        Ivec({Item.fur: 1}),
+                        Ivec_from({Item.water: 1, Item.barley: 1}),
+                        Ivec_from({Item.fur: 1}),
                         (38.6, 38.6),
                     ),
                     Crafting(
-                        Ivec({Item.water: 1, Item.barley: 1}),
-                        Ivec({Item.deer: 1}),
+                        Ivec_from({Item.water: 1, Item.barley: 1}),
+                        Ivec_from({Item.deer: 1}),
                         (30, 30),
                     ),
                     Crafting(
-                        Ivec({Item.water: 1, Item.barley: 1}),
-                        Ivec({Item.fur: 1}),
+                        Ivec_from({Item.water: 1, Item.barley: 1}),
+                        Ivec_from({Item.fur: 1}),
                         (38.6, 38.6),
                     ),
                     Crafting(
-                        Ivec({Item.water: 1, Item.barley: 1}),
-                        Ivec({Item.deer: 1}),
+                        Ivec_from({Item.water: 1, Item.barley: 1}),
+                        Ivec_from({Item.deer: 1}),
                         (30, 30),
                     ),
                     Crafting(
-                        Ivec({Item.water: 1, Item.barley: 1}),
-                        Ivec({Item.fur: 1, Item.meat: 1}),
+                        Ivec_from({Item.water: 1, Item.barley: 1}),
+                        Ivec_from({Item.fur: 1, Item.meat: 1}),
                         (42.2, 42.2),
                     ),
                 ],
@@ -659,32 +676,32 @@ def building_from_name(name: Bname) -> Building:
                     Crafting(
                         # TODO hmm ok just one of many foods ... dont have a good way to model it
                         # and which one would be taken, random uniform, always first?
-                        Ivec({Item.long_sword: 1, food: 1}),
-                        Ivec({Item.scrap_iron: 1}),
+                        Ivec_from({Item.long_sword: 1, food: 1}),
+                        Ivec_from({Item.scrap_iron: 1}),
                         (36 + 6, 36 + 6),  # NOTE not sure about the +6
                     )
                     for food in {Item.bread, Item.smoked_fish, Item.smoked_meat}
                 ]
                 + [  # attack 2
                     Crafting(
-                        Ivec({Item.broadsword: 1, Item.bread: 1, meat: 1}),
-                        Ivec({Item.scrap_iron: 2}),
+                        Ivec_from({Item.broadsword: 1, Item.bread: 1, meat: 1}),
+                        Ivec_from({Item.scrap_iron: 2}),
                         (36 + 6, 36 + 6),  # NOTE not sure about the +6
                     )
                     for meat in {Item.smoked_fish, Item.smoked_meat}
                 ]
                 + [  # attack 3
                     Crafting(
-                        Ivec({Item.double_edged_sword: 1, Item.beer: 1, meat: 1}),
-                        Ivec({Item.scrap_iron: 1, Item.mixed_scrap_metal: 1}),
+                        Ivec_from({Item.double_edged_sword: 1, Item.beer: 1, meat: 1}),
+                        Ivec_from({Item.scrap_iron: 1, Item.mixed_scrap_metal: 1}),
                         (36 + 6, 36 + 6),  # NOTE not sure about the +6
                     )
                     for meat in {Item.smoked_fish, Item.smoked_meat}
                 ]
                 + [  # health 1
                     Crafting(
-                        Ivec({Item.helmet: 1, food1: 1, food2: 1}),
-                        Ivec({}),
+                        Ivec_from({Item.helmet: 1, food1: 1, food2: 1}),
+                        Ivec_from({}),
                         (36 + 6, 36 + 6),  # NOTE not sure about the +6
                     )
                     for food1 in {Item.bread, Item.beer}
@@ -692,8 +709,8 @@ def building_from_name(name: Bname) -> Building:
                 ]
                 + [  # defense 1
                     Crafting(
-                        Ivec({Item.studded_fur_garment: 1, food1: 1, food2: 1}),
-                        Ivec({Item.old_fur_garment: 1}),
+                        Ivec_from({Item.studded_fur_garment: 1, food1: 1, food2: 1}),
+                        Ivec_from({Item.old_fur_garment: 1}),
                         (36 + 6, 36 + 6),  # NOTE not sure about the +6
                     )
                     for food1 in {Item.bread, Item.beer}
@@ -706,8 +723,8 @@ def building_from_name(name: Bname) -> Building:
             return BaseBuilding(
                 [  # attack 4
                     Crafting(
-                        Ivec({Item.long_sword: 1, food1: 1, food2: 1}),
-                        Ivec({}),
+                        Ivec_from({Item.long_sword: 1, food1: 1, food2: 1}),
+                        Ivec_from({}),
                         (28.8 + 6, 28.8 + 6),  # NOTE not sure about the +6
                     )
                     for food1 in {Item.honey_bread, Item.mead}
@@ -716,8 +733,8 @@ def building_from_name(name: Bname) -> Building:
                 + [  # attack 5
                     Crafting(
                         # TODO not clear of food2 is two of the same, or any two ...
-                        Ivec({Item.broadsword: 1, food1: 1, food2: 2}),
-                        Ivec({Item.scrap_iron: 2}),
+                        Ivec_from({Item.broadsword: 1, food1: 1, food2: 2}),
+                        Ivec_from({Item.scrap_iron: 2}),
                         (28.8 + 6, 28.8 + 6),  # NOTE not sure about the +6
                     )
                     for food1 in {Item.honey_bread, Item.mead}
@@ -725,7 +742,7 @@ def building_from_name(name: Bname) -> Building:
                 ]
                 + [  # attack 6
                     Crafting(
-                        Ivec(
+                        Ivec_from(
                             {
                                 Item.double_edged_sword: 1,
                                 Item.honey_bread: 1,
@@ -733,15 +750,15 @@ def building_from_name(name: Bname) -> Building:
                                 food: 1,
                             }
                         ),
-                        Ivec({Item.scrap_iron: 1, Item.mixed_scrap_metal: 1}),
+                        Ivec_from({Item.scrap_iron: 1, Item.mixed_scrap_metal: 1}),
                         (28.8 + 6, 28.8 + 6),  # NOTE not sure about the +6
                     )
                     for food in {Item.smoked_fish, Item.smoked_meat}
                 ]
                 + [  # defense 2
                     Crafting(
-                        Ivec({Item.golden_fur_garment: 1, food1: 1, food2: 1}),
-                        Ivec({Item.scrap_iron: 1, Item.old_fur_garment: 1}),
+                        Ivec_from({Item.golden_fur_garment: 1, food1: 1, food2: 1}),
+                        Ivec_from({Item.scrap_iron: 1, Item.old_fur_garment: 1}),
                         (36 + 6, 36 + 6),  # NOTE not sure about the +6
                     )
                     for food1 in {Item.honey_bread, Item.mead}
@@ -749,8 +766,8 @@ def building_from_name(name: Bname) -> Building:
                 ]
                 + [  # health 2
                     Crafting(
-                        Ivec({Item.golden_helmet: 1, food1: 1, food2: 1}),
-                        Ivec({Item.scrap_iron: 1}),
+                        Ivec_from({Item.golden_helmet: 1, food1: 1, food2: 1}),
+                        Ivec_from({Item.scrap_iron: 1}),
                         (32.4 + 6, 32.4 + 6),  # NOTE not sure about the +6
                     )
                     for food1 in {Item.honey_bread, Item.mead}
@@ -770,11 +787,11 @@ def get_buildings() -> Mapping[Bname, Building]:
 
 
 def get_takes_ips(buildings: list[BuildingCount]) -> Ivec:
-    return Ivec.from_sum([b.takes_ips() for b in buildings])
+    return Ivec_sum([b.takes_ips() for b in buildings])
 
 
 def get_makes_ips(buildings: list[BuildingCount]) -> Ivec:
-    return Ivec.from_sum([b.makes_ips() for b in buildings])
+    return Ivec_sum([b.makes_ips() for b in buildings])
 
 
 def get_balance_ips(buildings: list[BuildingCount]) -> Ivec:
@@ -826,16 +843,16 @@ def get_block_balance(block: Block) -> BlockBalance:
         else:
             local[i] = b
     return BlockBalance(
-        imports=Ivec(imports),
-        local=Ivec(local),
-        exports=Ivec(exports),
+        imports=Ivec_from(imports),
+        local=Ivec_from(local),
+        exports=Ivec_from(exports),
     )
 
 
 def get_global_balance(blocks: list[BlockBalance]) -> Ivec:
     imports = [b.imports.negate() for b in blocks]
     exports = [b.exports for b in blocks]
-    return Ivec.from_sum(imports + exports)
+    return Ivec_sum(imports + exports)
 
 
 def building_count_from_ips(item: Item, ips: float) -> list[tuple[Bname, float]]:
