@@ -413,11 +413,17 @@ def main():
         counts = [get_state_block_count(buildings, count) for count in block.counts]
         exports = block.exports.get(set())
         blocks.append(state.Block(imports, counts, exports))
-    take, make = state.wip(blocks)
-    st.subheader("take")
-    st_ivec(take, hints=False)
-    st.subheader("make")
-    st_ivec(make, hints=False)
+
+    for losses, counts in state.opt(blocks):
+        with st.container(border=True):
+            st.write(losses)
+            st.write(", ".join(f"{id(bc)} @{100 * u:.0f}%" for (bc, u) in counts))
+
+    # take, make = state.iterative(blocks)
+    # st.subheader("take")
+    # st_ivec(take, hints=False)
+    # st.subheader("make")
+    # st_ivec(make, hints=False)
     # TODO ok kinda works, but logic when not enough input is still a bit wrong
     # either way, want to fix that, want to add utilization to buildings
     # and show them, still all global, see if it makes sense, and allows

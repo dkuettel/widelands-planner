@@ -2,11 +2,16 @@ from __future__ import annotations
 
 import math
 import re
+from collections import defaultdict
 from collections.abc import Iterator, Mapping, Sequence, Set
 from dataclasses import dataclass
 from enum import StrEnum
 from functools import cache, partial
 from pathlib import Path
+from typing import final, override
+
+import torch
+from torch import Tensor, nn
 
 
 class Item(StrEnum):
@@ -920,7 +925,7 @@ def building_count_from_ips(item: Item, ips: float) -> list[tuple[Bname, float]]
     return counts
 
 
-def wip(blocks: list[Block]) -> tuple[Ivec, Ivec]:
+def iterative(blocks: list[Block]) -> tuple[Ivec, Ivec]:
     # TODO init with last solution?
     take: Ivec | None = None
     last_take: Ivec | None = None
@@ -951,10 +956,10 @@ def wip(blocks: list[Block]) -> tuple[Ivec, Ivec]:
         print("too many iterations")
 
     # TODO or close enough
-    assert take.lte(make)
+    assert take.lte(make)  # pyright: ignore[reportArgumentType, reportOptionalMemberAccess]
 
     # TODO really need a dataclass for this, so easy to flip
-    return take, make
+    return take, make  # pyright: ignore[reportReturnType]
 
 
 # def get_balance(blocks: list[Block]) -> None:
@@ -987,3 +992,88 @@ def wip(blocks: list[Block]) -> tuple[Ivec, Ivec]:
 #                 m = count.makes_ips(lt, lm)
 #                 makes[None].add(m.include(block.exports))
 #                 makes[id(block)].add(m.exclude(block.exports))
+
+
+@final
+class Model(nn.Module):
+    def __init__(self, counts: list[BuildingCount]):
+        super().__init__()
+        self.counts = counts
+        self.usage_logits = nn.ParameterList(torch.tensor(0.0) for _ in counts)
+
+    @override
+    def forward(self):
+        takes: dict[Item, list[Tensor]] = defaultdict(list)
+        makes: dict[Item, list[Tensor]] = defaultdict(list)
+
+        for count, usage_logit in zip(self.counts, self.usage_logits, strict=True):
+            u = torch.sigmoid(usage_logit)
+            ts = {i: u * v for (i, v) in count.takes_ips().data.items()}
+            ms = {i: u * v for (i, v) in count.makes_ips().data.items()}
+            for i, v in ts.items():
+                takes[i].append(v)
+            for i, v in ms.items():
+                makes[i].append(v)
+
+        take: dict[Item, Tensor] = {
+            i: torch.sum(torch.stack(vs)) for i, vs in takes.items() if len(vs) > 0
+        }
+        make: dict[Item, Tensor] = {
+            i: torch.sum(torch.stack(vs)) for i, vs in makes.items() if len(vs) > 0
+        }
+
+        balances = [
+            (take.get(i, torch.tensor(0.0)) - make.get(i, torch.tensor(0.0))).pow(2.0)
+            for i in Item
+            if i in take
+        ]
+        loss_balances = torch.mean(torch.stack(balances))
+
+        # TODO could be nicer to make it a loss that can be zero, so subtract from the max? also more balanced with other loss
+        dangles = [
+            -make.get(i, torch.tensor(0.0)).pow(2.0) for i in Item if i not in take
+        ]
+        loss_dangles = torch.mean(torch.stack(dangles))
+
+        loss_usage = torch.mean(
+            torch.stack(
+                [
+                    torch.tensor(1.0) - torch.sigmoid(usage_logit)
+                    for usage_logit in self.usage_logits
+                ]
+            )
+        )
+
+        return loss_balances + loss_dangles, loss_balances, loss_usage, loss_dangles
+
+
+def opt(
+    blocks: list[Block],
+) -> Iterator[tuple[tuple[float, ...], list[tuple[BuildingCount, float]]]]:
+    counts = [count for block in blocks for count in block.buildings]
+    if len(counts) == 0:
+        return
+    model = Model(counts)
+
+    # TODO wait, how does a >1 lr make sense again?
+    optim = torch.optim.SGD(params=model.parameters(), lr=1000, maximize=False)
+    # optim = torch.optim.Adam(params=model.parameters(), maximize=False)
+    model.train()
+
+    for i in range(10000):
+        optim.zero_grad()
+        [loss, *more] = model()
+        loss.backward()
+        optim.step()  # pyright: ignore[reportUnknownMemberType]
+
+        if i % 1000 == 0:
+            with torch.no_grad():
+                yield (
+                    (loss.item(), *(i.item() for i in more)),
+                    [
+                        (count, torch.sigmoid(logit).item())
+                        for (count, logit) in zip(
+                            counts, model.usage_logits, strict=True
+                        )
+                    ],
+                )
