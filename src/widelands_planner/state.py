@@ -237,16 +237,20 @@ class Crafting:
 
 @dataclass(frozen=True)
 class BaseBuilding:
+    name: Bname
     craftings: list[Crafting]
     pause: float
 
     @classmethod
-    def from_lua(cls, take: dict[Item, float], make: dict[Item, float], timings: str):
+    def from_lua(
+        cls, take: dict[Item, float], make: dict[Item, float], timings: str, name: Bname
+    ):
         path = Path(
             f"widelands/data/tribes/buildings/productionsites/frisians/{timings}/init.lua"
         )
         short, long = extract_plain_timings(path)
         return cls(
+            name,
             [
                 Crafting(
                     take=ifrom(take),
@@ -387,8 +391,9 @@ class BuildingCount:
         list[Equality],
         Variable,
     ]:
-        usage = Variable("usage", 0.0, 1.0)
-        idle = Variable("idle", 0.0, 1.0)
+        # TODO these descs are not fully unique, but makes it easier to debug the qp
+        usage = Variable(f"{self.building.building.name.value}/usage", 0.0, 1.0)
+        idle = Variable(f"{self.building.building.name.value}/idle", 0.0, 1.0)
 
         equations: list[Equality] = []
         equations.append(Equality({usage: 1.0, idle: 1.0}, 1.0))
@@ -426,7 +431,7 @@ def extract_plain_timings(path: Path) -> tuple[float, float]:
 
 @cache
 def building_from_name(name: Bname) -> Building:
-    b = partial(BaseBuilding.from_lua, timings=name.name)
+    b = partial(BaseBuilding.from_lua, timings=name.name, name=name)
     # TODO extracting take and make is difficult from the custom lua programs strings
     match name:
         case Bname.foresters_house:
@@ -474,6 +479,7 @@ def building_from_name(name: Bname) -> Building:
         case Bname.mead_brewery:
             # TODO normal bear a bit faster here (10%)
             return BaseBuilding(
+                name,
                 [
                     Crafting(
                         ifrom({Item.barley: 1, Item.water: 1, Item.honey: 1}),
@@ -499,6 +505,7 @@ def building_from_name(name: Bname) -> Building:
             # TODO normal bread a bit faster here (10%)
             # but it has two workers, does it mean running 2 worker programs?
             return BaseBuilding(
+                name,
                 [
                     Crafting(
                         ifrom({Item.barley: 1, Item.water: 1, Item.honey: 1}),
@@ -524,6 +531,7 @@ def building_from_name(name: Bname) -> Building:
             return b({Item.fur: 2}, {Item.fur_garment: 1})
         case Bname.tailors_shop:
             return BaseBuilding(
+                name,
                 [
                     Crafting(
                         ifrom({Item.fur_garment: 1, Item.iron: 1}),
@@ -542,6 +550,7 @@ def building_from_name(name: Bname) -> Building:
             dt = (70.167, 70.167)
             # TODO hm maybe could be extracted? timings at least
             return BaseBuilding(
+                name,
                 craftings=[
                     Crafting(ifrom({Item.iron: 1, Item.log: 1}), ifrom({i: 1}), dt)
                     for i in {
@@ -573,6 +582,7 @@ def building_from_name(name: Bname) -> Building:
             # if consumed uniformly?
             # this part could be coded? but not clear how we model a full cycle
             return BaseBuilding(
+                name,
                 craftings=[
                     Crafting(
                         ifrom({Item.fruit: 1}),
@@ -625,6 +635,7 @@ def building_from_name(name: Bname) -> Building:
             )
         case Bname.smokery:
             return BaseBuilding(
+                name,
                 [
                     Crafting(
                         ifrom({Item.log: 1, Item.fish: 2}),
@@ -641,6 +652,7 @@ def building_from_name(name: Bname) -> Building:
             )
         case Bname.furnace:
             return BaseBuilding(
+                name,
                 [
                     Crafting(
                         ifrom({Item.coal: 1, Item.iron_ore: 1}),
@@ -662,6 +674,7 @@ def building_from_name(name: Bname) -> Building:
             )
         case Bname.armor_smithy_small:
             return BaseBuilding(
+                name,
                 [
                     Crafting(
                         ifrom({Item.coal: 1, Item.iron: 1}),
@@ -683,6 +696,7 @@ def building_from_name(name: Bname) -> Building:
             )
         case Bname.armor_smithy_large:
             return BaseBuilding(
+                name,
                 [
                     Crafting(
                         ifrom({Item.coal: 1, Item.iron: 2, Item.gold: 1}),
@@ -716,6 +730,7 @@ def building_from_name(name: Bname) -> Building:
             # TODO it actually makes meat, even when only fur is needed
             # maybe after all this part needs to just be code?
             return BaseBuilding(
+                name,
                 [
                     Crafting(
                         ifrom({Item.water: 1, Item.barley: 1}),
@@ -760,6 +775,7 @@ def building_from_name(name: Bname) -> Building:
             # do they leave when max, or when no chance to update more?
             # TODO also not modeling soldier production, how to treat them?
             return BaseBuilding(
+                name,
                 [  # attack 1
                     Crafting(
                         # TODO hmm ok just one of many foods ... dont have a good way to model it
@@ -810,6 +826,7 @@ def building_from_name(name: Bname) -> Building:
         case Bname.training_arena:
             # TODO same as for training camp
             return BaseBuilding(
+                name,
                 [  # attack 4
                     Crafting(
                         ifrom({Item.long_sword: 1, food1: 1, food2: 1}),
@@ -1177,7 +1194,7 @@ def build_qp(
     return vars, problem
 
 
-def qp(blocks: list[Block]) -> Solution | None:
+def qp(blocks: list[Block]) -> tuple[list[str], Solution] | None:
     counts = [count for block in blocks for count in block.buildings]
     if len(counts) == 0:
         return None
@@ -1207,7 +1224,7 @@ def qp(blocks: list[Block]) -> Solution | None:
         if has_consumption(equation)
     }
 
-    _vars, problem = build_qp(set(idles), list(balances.values()) + equations)
+    vars, problem = build_qp(set(idles), list(balances.values()) + equations)
     solution = solve_problem(problem, solver="clarabel")
 
-    return solution
+    return [var.desc for var in vars], solution

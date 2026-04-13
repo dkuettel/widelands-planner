@@ -418,8 +418,10 @@ def main():
     match state.qp(blocks):
         case None:
             st.write("no solution")
-        case Solution() as s:
-            st.write(s.x)
+        case list(names), Solution() as s:
+            for name, value in zip(names, s.x, strict=True):  # pyright: ignore[reportArgumentType, reportUnknownVariableType]
+                if "usage" in name:
+                    st.write(name, round(value, 1))  # pyright: ignore[reportUnknownArgumentType]
 
     # for losses, counts in state.opt(blocks):
     #     with st.container(border=True):
