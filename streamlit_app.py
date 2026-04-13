@@ -11,6 +11,7 @@ from uuid import uuid4
 
 import pandas as pd
 import streamlit as st
+from qpsolvers import Solution
 
 from widelands_planner import state
 
@@ -414,10 +415,16 @@ def main():
         exports = block.exports.get(set())
         blocks.append(state.Block(imports, counts, exports))
 
-    for losses, counts in state.opt(blocks):
-        with st.container(border=True):
-            st.write(losses)
-            st.write(", ".join(f"{id(bc)} @{100 * u:.0f}%" for (bc, u) in counts))
+    match state.qp(blocks):
+        case None:
+            st.write("no solution")
+        case Solution() as s:
+            st.write(s.x)
+
+    # for losses, counts in state.opt(blocks):
+    #     with st.container(border=True):
+    #         st.write(losses)
+    #         st.write(", ".join(f"{id(bc)} @{100 * u:.0f}%" for (bc, u) in counts))
 
     # take, make = state.iterative(blocks)
     # st.subheader("take")

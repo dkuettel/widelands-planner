@@ -10,7 +10,10 @@ from functools import cache, partial
 from pathlib import Path
 from typing import final, override
 
+import numpy as np
 import torch
+from qpsolvers import Solution, solve_problem
+from qpsolvers.problem import Problem
 from torch import Tensor, nn
 
 
@@ -376,6 +379,28 @@ class BuildingCount:
     def makes_ips(self, take: Ivec | None = None, make: Ivec | None = None) -> Ivec:
         return self.building.makes_ips(take, make).smul(self.count * self.usage)
 
+    def get_constraints(
+        self,
+    ) -> tuple[
+        dict[Item, dict[Variable, float]],
+        dict[Item, dict[Variable, float]],
+        list[Equality],
+        Variable,
+    ]:
+        usage = Variable("usage", 0.0, 1.0)
+        idle = Variable("idle", 0.0, 1.0)
+
+        equations: list[Equality] = []
+        equations.append(Equality({usage: 1.0, idle: 1.0}, 1.0))
+
+        takes = self.takes_ips()
+        takes = {i: {usage: takes[i]} for i in takes.nonzero_items()}
+
+        makes = self.makes_ips()
+        makes = {i: {usage: makes[i]} for i in makes.nonzero_items()}
+
+        return takes, makes, equations, idle
+
 
 def extract_plain_timings(path: Path) -> tuple[float, float]:
     lua = path.read_text()
@@ -553,6 +578,8 @@ def building_from_name(name: Bname) -> Building:
                         ifrom({Item.fruit: 1}),
                         ifrom({Item.ration: 1}),
                         (55, 55),
+                        # TODO how does that work with maximization? that we prefer the two-input solution?
+                        # not just prefer, the mechanics require it when both are available
                         unless={Item.smoked_fish, Item.smoked_meat},
                     ),
                     Crafting(
@@ -717,6 +744,7 @@ def building_from_name(name: Bname) -> Building:
                     ),
                     Crafting(
                         ifrom({Item.water: 1, Item.barley: 1}),
+                        # TODO this one makes when fur is needed, meat is extra and could be over
                         ifrom({Item.fur: 1, Item.meat: 1}),
                         (42.2, 42.2),
                     ),
@@ -770,6 +798,7 @@ def building_from_name(name: Bname) -> Building:
                 + [  # defense 1
                     Crafting(
                         ifrom({Item.studded_fur_garment: 1, food1: 1, food2: 1}),
+                        # TODO how does this go with maximization? we might not care for old_* and scrap metal, but we dont want to limit it
                         ifrom({Item.old_fur_garment: 1}),
                         (36 + 6, 36 + 6),  # NOTE not sure about the +6
                     )
@@ -1077,3 +1106,108 @@ def opt(
                         )
                     ],
                 )
+
+
+@dataclass(frozen=True)
+class Variable:
+    desc: str
+    lb: None | float
+    ub: None | float
+
+    @override
+    def __eq__(self, other: object) -> bool:
+        return id(self) == id(other)
+
+
+@dataclass
+class Equality:
+    """weighted vars == const"""
+
+    vars: dict[Variable, float]
+    const: float
+
+    def variables(self) -> set[Variable]:
+        return set(self.vars)
+
+
+@dataclass
+class Inequality:
+    """weighted vars <= const"""
+
+    vars: dict[Variable, float]
+    const: float
+
+
+def build_qp(
+    min: Set[Variable], equations: Sequence[Equality]
+) -> tuple[list[Variable], Problem]:
+    vars = min | {var for equation in equations for var in equation.variables()}
+    vars = list(vars)
+    N = len(vars)
+    K = len(equations)
+
+    lb = np.array(
+        [-math.inf if var.lb is None else var.lb for var in vars], dtype=np.float32
+    )
+    ub = np.array(
+        [-math.inf if var.ub is None else var.ub for var in vars], dtype=np.float32
+    )
+
+    P = np.zeros([N, N], dtype=np.float32)
+    for var in min:
+        i = vars.index(var)
+        P[i, i] = 1.0
+
+    A = np.zeros([K, N], dtype=np.float32)
+    b = np.zeros([K], dtype=np.float32)
+    for i, eq in enumerate(equations):
+        for var, weight in eq.vars.items():
+            A[i, vars.index(var)] = weight
+        b[i] = eq.const
+
+    problem = Problem(
+        P=P,
+        q=np.zeros([N], dtype=np.float32),
+        A=A,
+        b=b,
+        lb=lb,
+        ub=ub,
+    )
+
+    return vars, problem
+
+
+def qp(blocks: list[Block]) -> Solution | None:
+    counts = [count for block in blocks for count in block.buildings]
+    if len(counts) == 0:
+        return None
+
+    balances: dict[Item, Equality] = {i: Equality(dict(), 0.0) for i in Item}
+    idles: list[Variable] = []
+    equations: list[Equality] = []
+
+    for count in counts:
+        take, make, eqs, idle = count.get_constraints()
+        for item, weights in take.items():
+            for var, weight in weights.items():
+                # TODO there should never be the variable existing already
+                balances[item].vars[var] = balances[item].vars.get(var, 0.0) - weight
+        for item, weights in make.items():
+            for var, weight in weights.items():
+                balances[item].vars[var] = balances[item].vars.get(var, 0.0) + weight
+        equations.extend(eqs)
+        idles.append(idle)
+
+    def has_consumption(equation: Equality) -> bool:
+        return any(v < 0.0 for v in equation.vars.values())
+
+    balances = {
+        item: equation
+        for (item, equation) in balances.items()
+        if has_consumption(equation)
+    }
+
+    _vars, problem = build_qp(set(idles), list(balances.values()) + equations)
+    solution = solve_problem(problem, solver="clarabel")
+
+    return solution
