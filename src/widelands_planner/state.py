@@ -320,6 +320,54 @@ class BaseBuilding:
 
         return TakeMake(take=tk.smul(ratio), make=mk.smul(ratio))
 
+    def get_constraints(
+        self,
+        usage: Variable,
+        takes: set[Item],
+        makes: set[Item],
+        speed: float,
+    ) -> tuple[
+        dict[Item, dict[Variable, float]],
+        dict[Item, dict[Variable, float]],
+        list[Equality],
+    ]:
+        # TODO draft
+        # for all valid craftings
+        # compute them alone as one solution option
+        # simplex them against usage in total
+        # but what about the break, how does this one come in linearly?
+        # and what about the multi-output ones, have to make the balance equation soft there
+
+        craftings = [
+            c
+            for c in self.craftings
+            if (
+                takes >= c.take.nonzero_items()
+                # TODO this is not quite correct, it should be based on whats available, not whats set
+                # and then prefer some over others too (two rations instead of single rations)
+                # or we do that with a min/max? that could be more exact, and possible
+                and (c.unless is None or not (takes & c.unless))
+                and (c.make.is_zero() or makes & c.make.nonzero_items())
+            )
+        ]
+
+        users = [Variable("user", 0.0, 1.0) for _ in craftings]
+        equations = [Equality({usage: 1.0} | {u: -1.0 for u in users}, 0.0)]
+
+        take: dict[Item, dict[Variable, float]] = dict()
+        make: dict[Item, dict[Variable, float]] = dict()
+
+        for user, crafting in zip(users, craftings, strict=True):
+            short, long = crafting.seconds
+            seconds = speed * short + (1 - speed) * long + self.pause
+            for i in crafting.take.nonzero_items():
+                # TODO every user should only appear once, right?
+                take.setdefault(i, dict())[user] = crafting.take[i] / seconds
+            for i in crafting.make.nonzero_items():
+                make.setdefault(i, dict())[user] = crafting.make[i] / seconds
+
+        return take, make, equations
+
     def takes_ips(
         self,
         take: Ivec | None,
@@ -354,6 +402,9 @@ class ConfiguredGenericBuilding:
     building: BaseBuilding
     takes: set[Item]
     makes: set[Item]
+    # NOTE this models how well the fields or collectable resources are placed, eg:
+    # - farms: are the fields close?
+    # - fishers: is the water close?
     speed: float  # 0 -> worst speed, 1 -> best speed
 
     def takes_ips(self, take: Ivec | None = None, make: Ivec | None = None) -> Ivec:
@@ -361,6 +412,18 @@ class ConfiguredGenericBuilding:
 
     def makes_ips(self, take: Ivec | None = None, make: Ivec | None = None) -> Ivec:
         return self.building.makes_ips(take, make, self.takes, self.makes, self.speed)
+
+    def get_constraints(
+        self, usage: Variable
+    ) -> tuple[
+        dict[Item, dict[Variable, float]],
+        dict[Item, dict[Variable, float]],
+        list[Equality],
+    ]:
+        takes, makes, equalities = self.building.get_constraints(
+            usage, self.takes, self.makes, self.speed
+        )
+        return takes, makes, equalities
 
 
 type Building = BaseBuilding
@@ -371,6 +434,7 @@ type ConfiguredBuilding = ConfiguredGenericBuilding
 class BuildingCount:
     count: int
     building: ConfiguredBuilding
+    # TODO a manual usage constrainer, do we want to keep it?
     usage: float
 
     def __post_init__(self):
@@ -392,17 +456,25 @@ class BuildingCount:
         Variable,
     ]:
         # TODO these descs are not fully unique, but makes it easier to debug the qp
-        usage = Variable(f"{self.building.building.name.value}/usage", 0.0, 1.0)
+        usage = Variable(f"{self.building.building.name.value}/usage", 0.0, self.usage)
         idle = Variable(f"{self.building.building.name.value}/idle", 0.0, 1.0)
 
         equations: list[Equality] = []
         equations.append(Equality({usage: 1.0, idle: 1.0}, 1.0))
 
-        takes = self.takes_ips()
-        takes = {i: {usage: takes[i]} for i in takes.nonzero_items()}
+        takes, makes, equalities = self.building.get_constraints(usage)
 
-        makes = self.makes_ips()
-        makes = {i: {usage: makes[i]} for i in makes.nonzero_items()}
+        equations.extend(equalities)
+
+        takes = {
+            item: {var: (self.count * weight) for (var, weight) in vars.items()}
+            for (item, vars) in takes.items()
+        }
+
+        makes = {
+            item: {var: (self.count * weight) for (var, weight) in vars.items()}
+            for (item, vars) in makes.items()
+        }
 
         return takes, makes, equations, idle
 
