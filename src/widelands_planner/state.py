@@ -1221,10 +1221,14 @@ def qp(blocks: list[Block]) -> tuple[list[str], Solution] | None:
     balances = {
         item: equation
         for (item, equation) in balances.items()
+        # TODO its nice and clean, but we might not want that after all?
+        # adding a building could bring everything to zero, maybe have options
+        # anyway options for exploring the solution space and seeing how much is needed?
         if has_consumption(equation)
     }
 
     vars, problem = build_qp(set(idles), list(balances.values()) + equations)
+    # TODO clarabel likes scipy.sparse.csc_matrix for speed, and no warnings
     solution = solve_problem(problem, solver="clarabel")
 
     return [var.desc for var in vars], solution
