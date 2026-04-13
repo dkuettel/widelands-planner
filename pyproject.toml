@@ -10,7 +10,7 @@ dependencies = [
     "pandas>=2.3.3",
     "pandas-stubs>=3.0.0.260204",
     "polars[style]>=1.39.0",
-    "qpsolvers[open-source-solvers]>=2.3.0",
+    "qpsolvers[clarabel]>=4.11.0",
     "streamlit>=1.55.0",
     "torch>=2.11.0",
 ]
