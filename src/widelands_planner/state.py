@@ -5,10 +5,10 @@ import re
 from collections import defaultdict
 from collections.abc import Iterator, Mapping, Sequence, Set
 from dataclasses import dataclass
-from enum import StrEnum
+from enum import Enum, StrEnum
 from functools import cache, partial
 from pathlib import Path
-from typing import final, override
+from typing import Literal, final, override
 
 import numpy as np
 import torch
@@ -229,6 +229,7 @@ class Crafting:
     seconds: tuple[float, float]  # (short, long)
     # TODO this also doesnt quite model if one entry is a bit lower than needed
     # then we will flip flop between the two modes
+    # TODO probably not needed anymore? hopefully no weird one there that we cant optimize by input maximization
     unless: None | set[Item] = None  # skip this crafting when these items are available
 
     def __post_init__(self):
@@ -330,14 +331,8 @@ class BaseBuilding:
         dict[Item, dict[Variable, float]],
         dict[Item, dict[Variable, float]],
         list[Equality],
+        list[Variable],  # minimization
     ]:
-        # TODO draft
-        # for all valid craftings
-        # compute them alone as one solution option
-        # simplex them against usage in total
-        # but what about the break, how does this one come in linearly?
-        # and what about the multi-output ones, have to make the balance equation soft there
-
         craftings = [
             c
             for c in self.craftings
@@ -346,7 +341,7 @@ class BaseBuilding:
                 # TODO this is not quite correct, it should be based on whats available, not whats set
                 # and then prefer some over others too (two rations instead of single rations)
                 # or we do that with a min/max? that could be more exact, and possible
-                and (c.unless is None or not (takes & c.unless))
+                # and (c.unless is None or not (takes & c.unless))
                 and (c.make.is_zero() or makes & c.make.nonzero_items())
             )
         ]
@@ -364,9 +359,22 @@ class BaseBuilding:
                 # TODO every user should only appear once, right?
                 take.setdefault(i, dict())[user] = crafting.take[i] / seconds
             for i in crafting.make.nonzero_items():
+                # TODO some makes need to be soft and dont require balance? usually when there is more than one output
+                # is that output just lost? or still built but doesnt back-pressure?
+                # back-pressure only depends on "if economy needs", but im not sure if the rest is still produced and stored?
+                # reindeer has a step to make fur, and one to make fur and meat
+                # both do when fur is needed, but the optimization doesnt balance it out probably?
+                # in this case, make it one step combined so they always happen?
                 make.setdefault(i, dict())[user] = crafting.make[i] / seconds
 
-        return take, make, equations
+        mins: list[Variable] = []
+        for item, vars in take.items():
+            m = max(vars.values())
+            unused = Variable(f"{item.value}/unused", 0.0, m)
+            equations.append(Equality(vars | {unused: 1.0}, m))
+            mins.append(unused)
+
+        return take, make, equations, mins
 
     def takes_ips(
         self,
@@ -419,11 +427,12 @@ class ConfiguredGenericBuilding:
         dict[Item, dict[Variable, float]],
         dict[Item, dict[Variable, float]],
         list[Equality],
+        list[Variable],  # minimization
     ]:
-        takes, makes, equalities = self.building.get_constraints(
+        takes, makes, equalities, mins = self.building.get_constraints(
             usage, self.takes, self.makes, self.speed
         )
-        return takes, makes, equalities
+        return takes, makes, equalities, mins
 
 
 type Building = BaseBuilding
@@ -454,6 +463,7 @@ class BuildingCount:
         dict[Item, dict[Variable, float]],
         list[Equality],
         Variable,
+        list[Variable],  # minimization
     ]:
         # TODO these descs are not fully unique, but makes it easier to debug the qp
         usage = Variable(f"{self.building.building.name.value}/usage", 0.0, self.usage)
@@ -462,7 +472,7 @@ class BuildingCount:
         equations: list[Equality] = []
         equations.append(Equality({usage: 1.0, idle: 1.0}, 1.0))
 
-        takes, makes, equalities = self.building.get_constraints(usage)
+        takes, makes, equalities, mins = self.building.get_constraints(usage)
 
         equations.extend(equalities)
 
@@ -476,7 +486,7 @@ class BuildingCount:
             for (item, vars) in makes.items()
         }
 
-        return takes, makes, equations, idle
+        return takes, makes, equations, idle, mins
 
 
 def extract_plain_timings(path: Path) -> tuple[float, float]:
@@ -1274,9 +1284,10 @@ def qp(blocks: list[Block]) -> tuple[list[str], Solution] | None:
     balances: dict[Item, Equality] = {i: Equality(dict(), 0.0) for i in Item}
     idles: list[Variable] = []
     equations: list[Equality] = []
+    mins: list[Variable] = []
 
     for count in counts:
-        take, make, eqs, idle = count.get_constraints()
+        take, make, eqs, idle, ms = count.get_constraints()
         for item, weights in take.items():
             for var, weight in weights.items():
                 # TODO there should never be the variable existing already
@@ -1286,6 +1297,7 @@ def qp(blocks: list[Block]) -> tuple[list[str], Solution] | None:
                 balances[item].vars[var] = balances[item].vars.get(var, 0.0) + weight
         equations.extend(eqs)
         idles.append(idle)
+        mins.extend(ms)
 
     def has_consumption(equation: Equality) -> bool:
         return any(v < 0.0 for v in equation.vars.values())
@@ -1299,8 +1311,10 @@ def qp(blocks: list[Block]) -> tuple[list[str], Solution] | None:
         if has_consumption(equation)
     }
 
-    vars, problem = build_qp(set(idles), list(balances.values()) + equations)
+    # vars, problem = build_qp(set(idles), list(balances.values()) + equations)
+    vars, problem = build_qp(set(mins), list(balances.values()) + equations)
     # TODO clarabel likes scipy.sparse.csc_matrix for speed, and no warnings
+    # TODO also, if it fails with numerical error, how do we see that?
     solution = solve_problem(problem, solver="clarabel")
 
     return [var.desc for var in vars], solution

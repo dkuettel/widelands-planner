@@ -419,6 +419,7 @@ def main():
         case None:
             st.write("no solution")
         case list(names), Solution() as s:
+            st.write(s.found)
             for name, value in zip(names, s.x, strict=True):  # pyright: ignore[reportArgumentType, reportUnknownVariableType]
                 if "usage" in name:
                     st.write(name, round(value, 1))  # pyright: ignore[reportUnknownArgumentType]
