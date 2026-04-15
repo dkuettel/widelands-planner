@@ -331,7 +331,7 @@ class BaseBuilding:
         dict[Item, dict[Variable, float]],
         dict[Item, dict[Variable, float]],
         list[Equality],
-        list[Variable],  # minimization
+        dict[Variable, float],  # minimization
     ]:
         craftings = [
             c
@@ -367,12 +367,12 @@ class BaseBuilding:
                 # in this case, make it one step combined so they always happen?
                 make.setdefault(i, dict())[user] = crafting.make[i] / seconds
 
-        mins: list[Variable] = []
+        mins: dict[Variable, float] = dict()
         for item, vars in take.items():
             m = max(vars.values())
             unused = Variable(f"{item.value}/unused", 0.0, m)
             equations.append(Equality(vars | {unused: 1.0}, m))
-            mins.append(unused)
+            mins[unused] = 1.0
 
         return take, make, equations, mins
 
@@ -427,7 +427,7 @@ class ConfiguredGenericBuilding:
         dict[Item, dict[Variable, float]],
         dict[Item, dict[Variable, float]],
         list[Equality],
-        list[Variable],  # minimization
+        dict[Variable, float],  # minimization
     ]:
         takes, makes, equalities, mins = self.building.get_constraints(
             usage, self.takes, self.makes, self.speed
@@ -463,7 +463,7 @@ class BuildingCount:
         dict[Item, dict[Variable, float]],
         list[Equality],
         Variable,
-        list[Variable],  # minimization
+        dict[Variable, float],  # minimization
     ]:
         # TODO these descs are not fully unique, but makes it easier to debug the qp
         usage = Variable(f"{self.building.building.name.value}/usage", 0.0, self.usage)
@@ -485,6 +485,8 @@ class BuildingCount:
             item: {var: (self.count * weight) for (var, weight) in vars.items()}
             for (item, vars) in makes.items()
         }
+
+        mins = {v: (self.count * w) for (v, w) in mins.items()}
 
         return takes, makes, equations, idle, mins
 
@@ -1238,9 +1240,9 @@ class Inequality:
 
 
 def build_qp(
-    min: Set[Variable], equations: Sequence[Equality]
+    min: dict[Variable, float], equations: Sequence[Equality]
 ) -> tuple[list[Variable], Problem]:
-    vars = min | {var for equation in equations for var in equation.variables()}
+    vars = set(min) | {var for equation in equations for var in equation.variables()}
     vars = list(vars)
     N = len(vars)
     K = len(equations)
@@ -1253,9 +1255,9 @@ def build_qp(
     )
 
     P = np.zeros([N, N], dtype=np.float32)
-    for var in min:
+    for var, w in min.items():
         i = vars.index(var)
-        P[i, i] = 1.0
+        P[i, i] = w
 
     A = np.zeros([K, N], dtype=np.float32)
     b = np.zeros([K], dtype=np.float32)
@@ -1284,7 +1286,7 @@ def qp(blocks: list[Block]) -> tuple[list[str], Solution] | None:
     balances: dict[Item, Equality] = {i: Equality(dict(), 0.0) for i in Item}
     idles: list[Variable] = []
     equations: list[Equality] = []
-    mins: list[Variable] = []
+    mins: dict[Variable, float] = dict()
 
     for count in counts:
         take, make, eqs, idle, ms = count.get_constraints()
@@ -1297,7 +1299,7 @@ def qp(blocks: list[Block]) -> tuple[list[str], Solution] | None:
                 balances[item].vars[var] = balances[item].vars.get(var, 0.0) + weight
         equations.extend(eqs)
         idles.append(idle)
-        mins.extend(ms)
+        mins.update(ms)
 
     def has_consumption(equation: Equality) -> bool:
         return any(v < 0.0 for v in equation.vars.values())
@@ -1311,8 +1313,7 @@ def qp(blocks: list[Block]) -> tuple[list[str], Solution] | None:
         if has_consumption(equation)
     }
 
-    # vars, problem = build_qp(set(idles), list(balances.values()) + equations)
-    vars, problem = build_qp(set(mins), list(balances.values()) + equations)
+    vars, problem = build_qp(mins, list(balances.values()) + equations)
     # TODO clarabel likes scipy.sparse.csc_matrix for speed, and no warnings
     # TODO also, if it fails with numerical error, how do we see that?
     solution = solve_problem(problem, solver="clarabel")
