@@ -1480,6 +1480,7 @@ def get_consumption(counts: list[BuildingCount], usages: list[float]) -> Ivec:
 
 def boost(counts: list[BuildingCount], allocations: list[Ivec]) -> list[Ivec]:
     for _ in range(20):
+        previous = allocations
         consumption = isum(allocations)
         production = isum(
             count.produces_ips(allocation)
@@ -1501,11 +1502,20 @@ def boost(counts: list[BuildingCount], allocations: list[Ivec]) -> list[Ivec]:
                 allocation.add(ifrom({item: demand * can}))
                 for allocation, demand in zip(allocations, demands, strict=True)
             ]
+        convergence = all(
+            a.almost_equal(b, 0.1 / 60)
+            for a, b in zip(previous, allocations, strict=True)
+        )
+        if convergence:
+            return allocations
     return allocations
 
 
 def back_pressure(counts: list[BuildingCount], allocations: list[Ivec]) -> list[Ivec]:
     for _ in range(20):
+        previous = allocations
+        # TODO this might have to happen only once? not sure with nonlinear craftings
+        # should we combine this into backpressure?
         allocations = [
             count.limit_waste(allocation)
             for count, allocation in zip(counts, allocations, strict=True)
@@ -1527,6 +1537,12 @@ def back_pressure(counts: list[BuildingCount], allocations: list[Ivec]) -> list[
                 count.back_pressure(allocation, item, ratio)
                 for count, allocation in zip(counts, allocations, strict=True)
             ]
+        convergence = all(
+            a.almost_equal(b, 0.1 / 60)
+            for a, b in zip(previous, allocations, strict=True)
+        )
+        if convergence:
+            return allocations
     return allocations
 
 
@@ -1543,12 +1559,15 @@ def fixpoint(
     for _ in range(20):
         # TODO convert allocations into a kind of usage?
         yield False, list(zip(counts, allocations, strict=True))
+        previous = allocations
         allocations = boost(counts, allocations)
         allocations = back_pressure(counts, allocations)
-        if False:  # TODO convergence
-            yield True, list(zip(counts, allocations, strict=True))
+        convergence = all(
+            a.almost_equal(b, 0.1 / 60)
+            for a, b in zip(previous, allocations, strict=True)
+        )
+        if convergence:
+            yield str(_), list(zip(counts, allocations, strict=True))
             return
 
-    else:
-        yield False, list(zip(counts, allocations, strict=True))
-        return
+    yield False, list(zip(counts, allocations, strict=True))
