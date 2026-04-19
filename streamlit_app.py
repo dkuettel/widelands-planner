@@ -11,7 +11,6 @@ from uuid import uuid4
 
 import pandas as pd
 import streamlit as st
-from qpsolvers import Solution
 
 from widelands_planner import state
 
@@ -82,7 +81,6 @@ class CountState:
     bname: EnumState[state.Bname]
     takes: SetState[state.Item]
     makes: SetState[state.Item]
-    usage: FloatState
     speed: FloatState
 
     @classmethod
@@ -95,7 +93,6 @@ class CountState:
             bname=EnumState(f"{key}.bname", state.Bname, state.Bname.fishers_house),
             takes=SetState(f"{key}.takes", state.Item),
             makes=SetState(f"{key}.makes", state.Item),
-            usage=FloatState(f"{key}.usage", 1),
             speed=FloatState(f"{key}.speed", 1),
         )
 
@@ -371,12 +368,10 @@ def get_state_block_count(
         case state.BaseBuilding():
             takes = count_state.takes.get(building.get_take_items())
             makes = count_state.makes.get(building.get_make_items())
-            usage = count_state.usage.get()
             speed = count_state.speed.get()
             return state.BuildingCount(
                 count,
                 state.ConfiguredGenericBuilding(building, takes, makes, speed),
-                usage,
             )
         case _ as never:
             assert_never(never)
@@ -390,7 +385,6 @@ def fn_change_building_type(count_state: CountState):
             case state.BaseBuilding():
                 count_state.takes.set(building.get_take_items())
                 count_state.makes.set(building.get_make_items())
-                count_state.usage.set(1)
                 count_state.speed.set(1)
             case _ as never:
                 assert_never(never)
@@ -418,8 +412,8 @@ def main():
     for opt, solution in state.fixpoint(blocks):
         pass  # NOTE taking only the last one
     with st.container(border=True, width=500):
-        st.write(opt)
-        for count, allocation in solution:
+        st.write(opt)  # pyright: ignore[reportPossiblyUnboundVariable]
+        for count, allocation in solution:  # pyright: ignore[reportPossiblyUnboundVariable]
             st.write(count.building.building.name)
             st_ivec(allocation, False)
 
@@ -538,13 +532,6 @@ def main():
                                     case _ as never:
                                         assert_never(never)
                                 st.slider(
-                                    "usage",
-                                    min_value=0.0,
-                                    max_value=1.0,
-                                    key=count_state.usage.key,
-                                    step=0.1,
-                                )
-                                st.slider(
                                     "speed",
                                     min_value=0.0,
                                     max_value=1.0,
@@ -575,7 +562,6 @@ def main():
                                         ]
                                     )
                                 )
-                                st.write(f"usage@{count_state.usage.get() * 100}%")
                                 st.write(f"speed@{count_state.speed.get() * 100}%")
                     # TODO could have buttons for all the likely candidates?
                     # and even the non-configures ones plus 1, other add and plus?

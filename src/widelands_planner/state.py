@@ -334,7 +334,6 @@ class BaseBuilding:
         takes: set[Item],
         makes: set[Item],
         speed: float,
-        usage: float,
         allocation: Ivec,
     ) -> Ivec:
         # TODO approx
@@ -436,7 +435,6 @@ class BaseBuilding:
                 # TODO every user should only appear once, right?
                 take.setdefault(i, dict())[user] = crafting.take[i] / seconds
             for i in crafting.make.nonzero_items():
-                todo()
                 # TODO some makes need to be soft and dont require balance? usually when there is more than one output
                 # is that output just lost? or still built but doesnt back-pressure?
                 # back-pressure only depends on "if economy needs", but im not sure if the rest is still produced and stored?
@@ -498,9 +496,9 @@ class ConfiguredGenericBuilding:
     def needs_ips(self, usage: float) -> Ivec:
         return self.building.needs_ips(self.takes, self.makes, self.speed, usage)
 
-    def produces_ips(self, usage: float, allocation: Ivec) -> Ivec:
+    def produces_ips(self, allocation: Ivec) -> Ivec:
         return self.building.produces_ips(
-            self.takes, self.makes, self.speed, usage, allocation
+            self.takes, self.makes, self.speed, allocation
         )
 
     def wants_ips(self, item: Item) -> float:
@@ -516,11 +514,6 @@ class ConfiguredGenericBuilding:
 
     def usage_for(self, allocation: Ivec) -> float:
         return self.building.usage_for(allocation, self.takes, self.makes, self.speed)
-
-    def wants_extra_ips(self, usage: float, item: Item, allocation: Ivec) -> float:
-        return self.building.wants_extra_ips(
-            usage, item, allocation, self.takes, self.makes, self.speed
-        )
 
     def takes_ips(self, take: Ivec | None = None, make: Ivec | None = None) -> Ivec:
         return self.building.takes_ips(take, make, self.takes, self.makes, self.speed)
@@ -550,22 +543,17 @@ type ConfiguredBuilding = ConfiguredGenericBuilding
 class BuildingCount:
     count: int
     building: ConfiguredBuilding
-    # TODO a manual usage constrainer, do we want to keep it?
-    usage: float
 
     def __post_init__(self):
         assert self.count >= 0
-        assert 0 <= self.usage <= 1
 
     def needs_ips(self, usage: float) -> Ivec:
-        return self.building.needs_ips(self.usage * usage).smul(self.count)
+        return self.building.needs_ips(usage).smul(self.count)
 
     def produces_ips(self, allocation: Ivec) -> Ivec:
         if self.count == 0:
             return izeros()
-        return self.building.produces_ips(self.usage, allocation.sdiv(self.count)).smul(
-            self.count
-        )
+        return self.building.produces_ips(allocation.sdiv(self.count)).smul(self.count)
 
     def wants_ips(self, item: Item) -> float:
         return self.building.wants_ips(item) * self.count
@@ -582,21 +570,11 @@ class BuildingCount:
             allocation.sdiv(self.count), item, ratio
         ).smul(self.count)
 
-    def usage_for(self, allocation: Ivec) -> float:
-        # TODO shaky, is it measured relative to self.usage or not? we might remove it anyway
-        return min(self.building.usage_for(allocation.sdiv(self.count)), self.usage)
-
-    def wants_extra_ips(self, item: Item, allocation: Ivec) -> float:
-        return (
-            self.building.wants_extra_ips(self.usage, item, allocation.sdiv(self.count))
-            * self.count
-        )
-
     def takes_ips(self, take: Ivec | None = None, make: Ivec | None = None) -> Ivec:
-        return self.building.takes_ips(take, make).smul(self.count * self.usage)
+        return self.building.takes_ips(take, make).smul(self.count)
 
     def makes_ips(self, take: Ivec | None = None, make: Ivec | None = None) -> Ivec:
-        return self.building.makes_ips(take, make).smul(self.count * self.usage)
+        return self.building.makes_ips(take, make).smul(self.count)
 
     def get_constraints(
         self,
@@ -608,7 +586,7 @@ class BuildingCount:
         dict[Variable, float],  # minimization
     ]:
         # TODO these descs are not fully unique, but makes it easier to debug the qp
-        usage = Variable(f"{self.building.building.name.value}/usage", 0.0, self.usage)
+        usage = Variable(f"{self.building.building.name.value}/usage", 0.0, 1.0)
         idle = Variable(f"{self.building.building.name.value}/idle", 0.0, 1.0)
 
         equations: list[Equality] = []
