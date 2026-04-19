@@ -352,9 +352,9 @@ class BaseBuilding:
         # TODO approx
         wants = self.get_ips(None, None, takes, makes, speed).take
         ratio = min(
-            (allocation[i] / w for i, w in wants.data.items() if w > 0.0), default=1.0
+            (allocation[i] / w for i, w in wants.data.items() if w > 0.0), default=0.0
         )
-        return allocation.smul(ratio)
+        return wants.smul(ratio)
 
     def back_pressure(
         self,
@@ -366,7 +366,10 @@ class BaseBuilding:
         ratio: float,
     ) -> Ivec:
         # TODO hmm doesnt it always mean just ratio? assuming it was tight before?
-        return allocation.smul(ratio)
+        # no, for multicrafting, much more difficult
+        if item in makes:
+            return allocation.smul(ratio)
+        return allocation
 
     def usage_for(
         self,
@@ -1476,7 +1479,7 @@ def get_consumption(counts: list[BuildingCount], usages: list[float]) -> Ivec:
 
 
 def boost(counts: list[BuildingCount], allocations: list[Ivec]) -> list[Ivec]:
-    for _ in range(100):
+    for _ in range(20):
         consumption = isum(allocations)
         production = isum(
             count.produces_ips(allocation)
@@ -1486,9 +1489,14 @@ def boost(counts: list[BuildingCount], allocations: list[Ivec]) -> list[Ivec]:
             surplus = production[item] - consumption[item]
             if surplus <= 0.0:
                 continue
-            demands = [count.wants_ips(item) for count in counts]
+            demands = [
+                count.wants_ips(item) - allocation[item]
+                for count, allocation in zip(counts, allocations, strict=True)
+            ]
             demand = sum(demands)
-            can = min(demand / surplus, 1.0)
+            if demand <= 0.0:
+                continue
+            can = min(surplus / demand, 1.0)
             allocations = [
                 allocation.add(ifrom({item: demand * can}))
                 for allocation, demand in zip(allocations, demands, strict=True)
@@ -1497,7 +1505,7 @@ def boost(counts: list[BuildingCount], allocations: list[Ivec]) -> list[Ivec]:
 
 
 def back_pressure(counts: list[BuildingCount], allocations: list[Ivec]) -> list[Ivec]:
-    for _ in range(100):
+    for _ in range(20):
         allocations = [
             count.limit_waste(allocation)
             for count, allocation in zip(counts, allocations, strict=True)
@@ -1514,7 +1522,7 @@ def back_pressure(counts: list[BuildingCount], allocations: list[Ivec]) -> list[
             surplus = production[item] - consumption[item]
             if surplus <= 0.0:
                 continue
-            ratio = 1.0 - surplus / production[item]
+            ratio = consumption[item] / production[item]
             allocations = [
                 count.back_pressure(allocation, item, ratio)
                 for count, allocation in zip(counts, allocations, strict=True)
@@ -1524,7 +1532,7 @@ def back_pressure(counts: list[BuildingCount], allocations: list[Ivec]) -> list[
 
 def fixpoint(
     blocks: list[Block],
-) -> Iterator[tuple[bool, list[tuple[BuildingCount, Ivec]]]]:
+) -> Iterator[tuple[bool | str, list[tuple[BuildingCount, Ivec]]]]:
     counts = [count for block in blocks for count in block.buildings]
     if len(counts) == 0:
         yield True, []
@@ -1532,7 +1540,7 @@ def fixpoint(
 
     allocations = [izeros() for _ in counts]
 
-    for _ in range(100):
+    for _ in range(20):
         # TODO convert allocations into a kind of usage?
         yield False, list(zip(counts, allocations, strict=True))
         allocations = boost(counts, allocations)
