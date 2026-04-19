@@ -415,11 +415,11 @@ def main():
         exports = block.exports.get(set())
         blocks.append(state.Block(imports, counts, exports))
 
-    for opt, allocations in state.fixpoint(blocks):
+    for opt, solution in state.fixpoint(blocks):
         with st.container(border=True):
             st.write(opt)
-            for allocation in allocations:
-                st.write(allocation.data)
+            for count, allocation in solution:
+                st.write(count.building.building.name, allocation.data)
 
     # match state.qp(blocks):
     #     case None:

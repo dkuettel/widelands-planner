@@ -1524,7 +1524,7 @@ def back_pressure(counts: list[BuildingCount], allocations: list[Ivec]) -> list[
 
 def fixpoint(
     blocks: list[Block],
-) -> Iterator[tuple[bool, list[Ivec]]]:
+) -> Iterator[tuple[bool, list[tuple[BuildingCount, Ivec]]]]:
     counts = [count for block in blocks for count in block.buildings]
     if len(counts) == 0:
         yield True, []
@@ -1534,13 +1534,13 @@ def fixpoint(
 
     for _ in range(100):
         # TODO convert allocations into a kind of usage?
-        yield False, allocations
+        yield False, list(zip(counts, allocations, strict=True))
         allocations = boost(counts, allocations)
         allocations = back_pressure(counts, allocations)
         if False:  # TODO convergence
-            yield True, allocations
+            yield True, list(zip(counts, allocations, strict=True))
             return
 
     else:
-        yield False, allocations
+        yield False, list(zip(counts, allocations, strict=True))
         return
