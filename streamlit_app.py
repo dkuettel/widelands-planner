@@ -415,14 +415,20 @@ def main():
         exports = block.exports.get(set())
         blocks.append(state.Block(imports, counts, exports))
 
-    match state.qp(blocks):
-        case None:
-            st.write("no solution")
-        case list(names), Solution() as s:
-            st.write(s.found)
-            for name, value in zip(names, s.x, strict=True):  # pyright: ignore[reportArgumentType, reportUnknownVariableType]
-                if "usage" in name:
-                    st.write(name, round(value, 1))  # pyright: ignore[reportUnknownArgumentType]
+    for opt, allocations in state.fixpoint(blocks):
+        with st.container(border=True):
+            st.write(opt)
+            for allocation in allocations:
+                st.write(allocation.data)
+
+    # match state.qp(blocks):
+    #     case None:
+    #         st.write("no solution")
+    #     case list(names), Solution() as s:
+    #         st.write(s.found)
+    #         for name, value in zip(names, s.x, strict=True):  # pyright: ignore[reportArgumentType, reportUnknownVariableType]
+    #             if "usage" in name:
+    #                 st.write(name, round(value, 1))  # pyright: ignore[reportUnknownArgumentType]
 
     # for losses, counts in state.opt(blocks):
     #     with st.container(border=True):

@@ -3,16 +3,19 @@ from __future__ import annotations
 import math
 import re
 from collections import defaultdict
-from collections.abc import Iterator, Mapping, Sequence, Set
+from collections.abc import Iterable, Iterator, Mapping, Sequence, Set
 from dataclasses import dataclass
-from enum import Enum, StrEnum
+from enum import StrEnum
 from functools import cache, partial
 from pathlib import Path
-from typing import Literal, final, override
+from typing import final, override
 
 import numpy as np
 import torch
-from qpsolvers import Solution, solve_problem
+from qpsolvers import (
+    Solution,
+    solve_problem,  # pyright: ignore[reportUnknownVariableType]
+)
 from qpsolvers.problem import Problem
 from torch import Tensor, nn
 
@@ -208,8 +211,8 @@ def ifrom(data: dict[Item, float]) -> Ivec:
     return Vec[Item](Item, data)
 
 
-def isum(sequence: Sequence[Ivec]) -> Ivec:
-    return Vec[Item].from_sum(Item, sequence)
+def isum(sequence: Iterable[Ivec]) -> Ivec:
+    return Vec[Item].from_sum(Item, list(sequence))
 
 
 @dataclass(frozen=True)
@@ -321,6 +324,77 @@ class BaseBuilding:
 
         return TakeMake(take=tk.smul(ratio), make=mk.smul(ratio))
 
+    def needs_ips(
+        self, takes: set[Item], makes: set[Item], speed: float, usage: float
+    ) -> Ivec:
+        return self.get_ips(None, None, takes, makes, speed).take.smul(usage)
+
+    def produces_ips(
+        self,
+        takes: set[Item],
+        makes: set[Item],
+        speed: float,
+        usage: float,
+        allocation: Ivec,
+    ) -> Ivec:
+        # TODO approx
+        u = self.usage_for(allocation, takes, makes, speed)
+        return self.get_ips(None, None, takes, makes, speed).make.smul(u)
+
+    def wants_ips(
+        self, takes: set[Item], makes: set[Item], speed: float, item: Item
+    ) -> float:
+        return self.get_ips(None, None, takes, makes, speed).take[item]
+
+    def limit_waste(
+        self, takes: set[Item], makes: set[Item], speed: float, allocation: Ivec
+    ) -> Ivec:
+        # TODO approx
+        wants = self.get_ips(None, None, takes, makes, speed).take
+        ratio = min(
+            (allocation[i] / w for i, w in wants.data.items() if w > 0.0), default=1.0
+        )
+        return allocation.smul(ratio)
+
+    def back_pressure(
+        self,
+        takes: set[Item],
+        makes: set[Item],
+        speed: float,
+        allocation: Ivec,
+        item: Item,
+        ratio: float,
+    ) -> Ivec:
+        # TODO hmm doesnt it always mean just ratio? assuming it was tight before?
+        return allocation.smul(ratio)
+
+    def usage_for(
+        self,
+        allocation: Ivec,
+        takes: set[Item],
+        makes: set[Item],
+        speed: float,
+    ) -> float:
+        # TODO approx for now
+        wants = self.get_ips(None, None, takes, makes, speed).take
+        return min(
+            (allocation[i] / w for i, w in wants.data.items() if w > 0.0), default=1.0
+        )
+
+    # TODO would be easier to say wants total? not sure how much it depends on state really
+    def wants_extra_ips(
+        self,
+        usage: float,
+        item: Item,
+        allocation: Ivec,
+        takes: set[Item],
+        makes: set[Item],
+        speed: float,
+    ):
+        # TODO also very approx
+        take = self.get_ips(None, None, takes, makes, speed).take.smul(usage)[item]
+        return take - allocation[item]
+
     def get_constraints(
         self,
         usage: Variable,
@@ -359,12 +433,15 @@ class BaseBuilding:
                 # TODO every user should only appear once, right?
                 take.setdefault(i, dict())[user] = crafting.take[i] / seconds
             for i in crafting.make.nonzero_items():
+                todo()
                 # TODO some makes need to be soft and dont require balance? usually when there is more than one output
                 # is that output just lost? or still built but doesnt back-pressure?
                 # back-pressure only depends on "if economy needs", but im not sure if the rest is still produced and stored?
                 # reindeer has a step to make fur, and one to make fur and meat
                 # both do when fur is needed, but the optimization doesnt balance it out probably?
                 # in this case, make it one step combined so they always happen?
+                # so we connect output only to the balance equation in a hard way if it is part of "economy needs"? or at least semantically? because we do it for woodcutters too
+                # otherwise, how to connect it so that it is used, but okay if overflow if nothing else?
                 make.setdefault(i, dict())[user] = crafting.make[i] / seconds
 
         mins: dict[Variable, float] = dict()
@@ -415,6 +492,33 @@ class ConfiguredGenericBuilding:
     # - fishers: is the water close?
     speed: float  # 0 -> worst speed, 1 -> best speed
 
+    def needs_ips(self, usage: float) -> Ivec:
+        return self.building.needs_ips(self.takes, self.makes, self.speed, usage)
+
+    def produces_ips(self, usage: float, allocation: Ivec) -> Ivec:
+        return self.building.produces_ips(
+            self.takes, self.makes, self.speed, usage, allocation
+        )
+
+    def wants_ips(self, item: Item) -> float:
+        return self.building.wants_ips(self.takes, self.makes, self.speed, item)
+
+    def limit_waste(self, allocation: Ivec) -> Ivec:
+        return self.building.limit_waste(self.takes, self.makes, self.speed, allocation)
+
+    def back_pressure(self, allocation: Ivec, item: Item, ratio: float) -> Ivec:
+        return self.building.back_pressure(
+            self.takes, self.makes, self.speed, allocation, item, ratio
+        )
+
+    def usage_for(self, allocation: Ivec) -> float:
+        return self.building.usage_for(allocation, self.takes, self.makes, self.speed)
+
+    def wants_extra_ips(self, usage: float, item: Item, allocation: Ivec) -> float:
+        return self.building.wants_extra_ips(
+            usage, item, allocation, self.takes, self.makes, self.speed
+        )
+
     def takes_ips(self, take: Ivec | None = None, make: Ivec | None = None) -> Ivec:
         return self.building.takes_ips(take, make, self.takes, self.makes, self.speed)
 
@@ -449,6 +553,41 @@ class BuildingCount:
     def __post_init__(self):
         assert self.count >= 0
         assert 0 <= self.usage <= 1
+
+    def needs_ips(self, usage: float) -> Ivec:
+        return self.building.needs_ips(self.usage * usage).smul(self.count)
+
+    def produces_ips(self, allocation: Ivec) -> Ivec:
+        if self.count == 0:
+            return izeros()
+        return self.building.produces_ips(self.usage, allocation.sdiv(self.count)).smul(
+            self.count
+        )
+
+    def wants_ips(self, item: Item) -> float:
+        return self.building.wants_ips(item) * self.count
+
+    def limit_waste(self, allocation: Ivec) -> Ivec:
+        if self.count == 0:
+            return izeros()
+        return self.building.limit_waste(allocation.sdiv(self.count)).smul(self.count)
+
+    def back_pressure(self, allocation: Ivec, item: Item, ratio: float) -> Ivec:
+        if self.count == 0:
+            return izeros()
+        return self.building.back_pressure(
+            allocation.sdiv(self.count), item, ratio
+        ).smul(self.count)
+
+    def usage_for(self, allocation: Ivec) -> float:
+        # TODO shaky, is it measured relative to self.usage or not? we might remove it anyway
+        return min(self.building.usage_for(allocation.sdiv(self.count)), self.usage)
+
+    def wants_extra_ips(self, item: Item, allocation: Ivec) -> float:
+        return (
+            self.building.wants_extra_ips(self.usage, item, allocation.sdiv(self.count))
+            * self.count
+        )
 
     def takes_ips(self, take: Ivec | None = None, make: Ivec | None = None) -> Ivec:
         return self.building.takes_ips(take, make).smul(self.count * self.usage)
@@ -1225,6 +1364,7 @@ class Equality:
     """weighted vars == const"""
 
     vars: dict[Variable, float]
+    # TODO are data classes better, or just plain dicts? None could be the key for the constant?
     const: float
 
     def variables(self) -> set[Variable]:
@@ -1319,3 +1459,88 @@ def qp(blocks: list[Block]) -> tuple[list[str], Solution] | None:
     solution = solve_problem(problem, solver="clarabel")
 
     return [var.desc for var in vars], solution
+
+
+def get_production(counts: list[BuildingCount], allocations: list[Ivec]) -> Ivec:
+    production: Ivec = izeros()
+    for count, allocation in zip(counts, allocations, strict=True):
+        production = production.add(count.produces_ips(allocation))
+    return production
+
+
+def get_consumption(counts: list[BuildingCount], usages: list[float]) -> Ivec:
+    consumption = izeros()
+    for count, usage in zip(counts, usages, strict=True):
+        consumption = consumption.add(count.takes_ips().smul(usage))
+    return consumption
+
+
+def boost(counts: list[BuildingCount], allocations: list[Ivec]) -> list[Ivec]:
+    for _ in range(100):
+        consumption = isum(allocations)
+        production = isum(
+            count.produces_ips(allocation)
+            for count, allocation in zip(counts, allocations, strict=True)
+        )
+        for item in Item:
+            surplus = production[item] - consumption[item]
+            if surplus <= 0.0:
+                continue
+            demands = [count.wants_ips(item) for count in counts]
+            demand = sum(demands)
+            can = min(demand / surplus, 1.0)
+            allocations = [
+                allocation.add(ifrom({item: demand * can}))
+                for allocation, demand in zip(allocations, demands, strict=True)
+            ]
+    return allocations
+
+
+def back_pressure(counts: list[BuildingCount], allocations: list[Ivec]) -> list[Ivec]:
+    for _ in range(100):
+        allocations = [
+            count.limit_waste(allocation)
+            for count, allocation in zip(counts, allocations, strict=True)
+        ]
+        consumption = isum(allocations)
+        production = isum(
+            count.produces_ips(allocation)
+            for count, allocation in zip(counts, allocations, strict=True)
+        )
+        for item in Item:
+            # TODO here, how to manage roots where we dont want to limit? like with opt
+            if item is Item.log or item not in consumption.data:
+                continue
+            surplus = production[item] - consumption[item]
+            if surplus <= 0.0:
+                continue
+            ratio = 1.0 - surplus / production[item]
+            allocations = [
+                count.back_pressure(allocation, item, ratio)
+                for count, allocation in zip(counts, allocations, strict=True)
+            ]
+    return allocations
+
+
+def fixpoint(
+    blocks: list[Block],
+) -> Iterator[tuple[bool, list[Ivec]]]:
+    counts = [count for block in blocks for count in block.buildings]
+    if len(counts) == 0:
+        yield True, []
+        return
+
+    allocations = [izeros() for _ in counts]
+
+    for _ in range(100):
+        # TODO convert allocations into a kind of usage?
+        yield False, allocations
+        allocations = boost(counts, allocations)
+        allocations = back_pressure(counts, allocations)
+        if False:  # TODO convergence
+            yield True, allocations
+            return
+
+    else:
+        yield False, allocations
+        return
