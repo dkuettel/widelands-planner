@@ -1561,7 +1561,7 @@ def get_consumption(counts: list[BuildingCount], usages: list[float]) -> Ivec:
     return consumption
 
 
-def boost(counts: list[BuildingCount], allocations: list[Ivec]) -> list[Ivec]:
+def flood_forward(counts: list[BuildingCount], allocations: list[Ivec]) -> list[Ivec]:
     for _ in range(20):
         previous_allocations = allocations
         consumption = isum(allocations)
@@ -1650,7 +1650,7 @@ def fixpoint(
         # TODO convert allocations into a kind of usage?
         yield False, list(zip(counts, allocations, strict=True))
         previous_allocations = allocations
-        allocations = boost(counts, allocations)
+        allocations = flood_forward(counts, allocations)
         allocations = back_pressure(counts, allocations)
         convergence = all(
             a.almost_equal(b, 0.01 / 60)
