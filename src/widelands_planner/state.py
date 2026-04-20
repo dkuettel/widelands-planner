@@ -238,6 +238,16 @@ class Crafting:
     def __post_init__(self):
         assert self.seconds[0] <= self.seconds[1]
 
+    def takes_ips(self, speed: float) -> Ivec:
+        short, long = self.seconds
+        seconds = speed * short + (1 - speed) * long
+        return self.take.sdiv(seconds)
+
+    def makes_ips(self, speed: float) -> Ivec:
+        short, long = self.seconds
+        seconds = speed * short + (1 - speed) * long
+        return self.make.sdiv(seconds)
+
 
 @dataclass(frozen=True)
 class BaseBuilding:
@@ -329,6 +339,21 @@ class BaseBuilding:
     ) -> Ivec:
         return self.get_ips(None, None, takes, makes, speed).take.smul(usage)
 
+    def get_enabled_craftings(
+        self, takes: set[Item], makes: set[Item]
+    ) -> list[Crafting]:
+        return [
+            c
+            for c in self.craftings
+            if (
+                takes >= c.take.nonzero_items()
+                # TODO we will probably remove the unless thing soon and use preferred levels
+                # and (c.unless is None or not (takes & c.unless))
+                # TODO we probably should only define takes anyway
+                # and (c.make.is_zero() or makes & c.make.nonzero_items())
+            )
+        ]
+
     def produces_ips(
         self,
         takes: set[Item],
@@ -336,9 +361,29 @@ class BaseBuilding:
         speed: float,
         allocation: Ivec,
     ) -> Ivec:
-        # TODO approx
-        u = self.usage_for(allocation, takes, makes, speed)
-        return self.get_ips(None, None, takes, makes, speed).make.smul(u)
+        # TODO make preferences, two level, fill first level first, like in the bakery
+        # TODO actually we can only control the takes, not the makes, right?
+        craftings: list[Crafting] = self.get_enabled_craftings(takes, makes)
+        total_make_ips: Ivec = izeros()
+        used: float = 0.0
+        while used < 1.0 and len(craftings) > 0:
+            take_ips: Ivec = isum(c.takes_ips(speed) for c in craftings)
+            make_ips: Ivec = isum(c.makes_ips(speed) for c in craftings)
+            constraint_item: Item | None = min(
+                take_ips.nonzero_items(),
+                key=lambda i: allocation[i] / take_ips[i],
+                default=None,
+            )
+            possible_use: float
+            match constraint_item:
+                case Item(item):
+                    craftings = [c for c in craftings if c.take[item] <= 0.0]
+                    possible_use = allocation[item] / take_ips[item]
+                case None:
+                    possible_use = 1.0
+            old_used, used = used, min(used + possible_use, 1.0)
+            total_make_ips = total_make_ips.add(make_ips.smul(used - old_used))
+        return total_make_ips
 
     def wants_ips(
         self, takes: set[Item], makes: set[Item], speed: float, item: Item
@@ -1458,7 +1503,7 @@ def get_consumption(counts: list[BuildingCount], usages: list[float]) -> Ivec:
 
 def boost(counts: list[BuildingCount], allocations: list[Ivec]) -> list[Ivec]:
     for _ in range(20):
-        previous = allocations
+        previous_allocations = allocations
         consumption = isum(allocations)
         production = isum(
             count.produces_ips(allocation)
@@ -1482,7 +1527,7 @@ def boost(counts: list[BuildingCount], allocations: list[Ivec]) -> list[Ivec]:
             ]
         convergence = all(
             a.almost_equal(b, 0.1 / 60)
-            for a, b in zip(previous, allocations, strict=True)
+            for a, b in zip(previous_allocations, allocations, strict=True)
         )
         if convergence:
             return allocations
@@ -1491,7 +1536,7 @@ def boost(counts: list[BuildingCount], allocations: list[Ivec]) -> list[Ivec]:
 
 def back_pressure(counts: list[BuildingCount], allocations: list[Ivec]) -> list[Ivec]:
     for _ in range(20):
-        previous = allocations
+        previous_allocations = allocations
         # TODO this might have to happen only once? not sure with nonlinear craftings
         # should we combine this into backpressure?
         allocations = [
@@ -1505,7 +1550,8 @@ def back_pressure(counts: list[BuildingCount], allocations: list[Ivec]) -> list[
         )
         for item in Item:
             # TODO here, how to manage roots where we dont want to limit? like with opt
-            if item is Item.log or item not in consumption.data:
+            # if item is Item.log or item not in consumption.data:
+            if item not in consumption.data:
                 continue
             surplus = production[item] - consumption[item]
             if surplus <= 0.0:
@@ -1517,7 +1563,7 @@ def back_pressure(counts: list[BuildingCount], allocations: list[Ivec]) -> list[
             ]
         convergence = all(
             a.almost_equal(b, 0.1 / 60)
-            for a, b in zip(previous, allocations, strict=True)
+            for a, b in zip(previous_allocations, allocations, strict=True)
         )
         if convergence:
             return allocations
@@ -1532,19 +1578,25 @@ def fixpoint(
         yield True, []
         return
 
+    # TODO need to introduce blocks, and fulfil locally first
+    # backpressure similar? its a bit messy. and allocations need to be local vs global too
+    # btw, whats a good way to identify a block vs describing it?
+    # pass the desc and have a .id? just for fun its interesting, when to use handle, when to use thing
     allocations = [izeros() for _ in counts]
 
     for _ in range(20):
         # TODO convert allocations into a kind of usage?
         yield False, list(zip(counts, allocations, strict=True))
-        previous = allocations
+        previous_allocations = allocations
         allocations = boost(counts, allocations)
         allocations = back_pressure(counts, allocations)
         convergence = all(
             a.almost_equal(b, 0.1 / 60)
-            for a, b in zip(previous, allocations, strict=True)
+            for a, b in zip(previous_allocations, allocations, strict=True)
         )
         if convergence:
+            # TODO ah but we dont see the productions, so thats why we dont see water, doesnt mean its broken at that point
+            # maybe still bakery is the problem?
             yield str(_), list(zip(counts, allocations, strict=True))
             return
 
