@@ -367,34 +367,73 @@ class BaseBuilding:
         speed: float,
         allocation: Ivec,
     ) -> Ivec:
+        _take, make = self.allocate_ips(takes, makes, speed, allocation)
+        return make
+
+    def allocate_ips(
+        self,
+        takes: set[Item],
+        makes: set[Item],
+        speed: float,
+        allocation: Ivec,
+        limit: Ivec | None = None,
+    ) -> tuple[Ivec, Ivec]:
+        # NOTE limit is interpreted as limit only when value set
+        # unset values are "inf"
+        if limit is None:
+            limit = izeros()
         # TODO make preferences, two level, fill first level first, like in the bakery
         # TODO actually we can only control the takes, not the makes, right?
         craftings: list[Crafting] = self.get_enabled_craftings(takes, makes)
         craftings = [
-            c for c in craftings if c.take.nonzero_items() <= allocation.nonzero_items()
+            c
+            for c in craftings
+            if c.take.nonzero_items() <= allocation.nonzero_items()
+            and not (
+                c.make.nonzero_items() & {i for i, v in limit.data.items() if v == 0.0}
+            )
         ]
+        total_take_ips = izeros()
         total_make_ips = izeros()
         used = 0.0
         while used < 1.0 and len(craftings) > 0:
             take_ips, make_ips = self.take_make_ips_from_craftings(craftings, speed)
-            constraints = (
+            allocation_constraints = (
                 (item, allocation[item] / ips)
                 for item, ips in take_ips.data.items()
                 if ips > 0.0
             )
-            item, ratio = min(constraints, key=lambda x: x[1], default=(None, 1.0))
+            allocation_item, allocation_ratio = min(
+                allocation_constraints, key=lambda x: x[1], default=(None, 1.0)
+            )
+            limit_constraints = (
+                (item, limit[item] / ips)
+                for item, ips in make_ips.data.items()
+                if ips > 0.0 and item in limit.data
+            )
+            limit_item, limit_ratio = min(
+                limit_constraints, key=lambda x: x[1], default=(None, 1.0)
+            )
+            ratio = min(allocation_ratio, limit_ratio)
             old_used, used = used, min(used + ratio, 1.0)
             ratio = used - old_used
             allocation = allocation.sub(take_ips.smul(ratio))
-            if item is not None:
-                allocation.data[item] = 0.0
+            if allocation_item is not None:
+                allocation.data[allocation_item] = 0.0
+            if limit_item is not None:
+                limit.data[limit_item] = 0.0
+            total_take_ips = total_take_ips.add(take_ips.smul(ratio))
             total_make_ips = total_make_ips.add(make_ips.smul(ratio))
             craftings = [
                 c
                 for c in craftings
                 if c.take.nonzero_items() <= allocation.nonzero_items()
+                and not (
+                    c.make.nonzero_items()
+                    & {i for i, v in limit.data.items() if v == 0.0}
+                )
             ]
-        return total_make_ips
+        return total_take_ips, total_make_ips
 
     def wants_ips(
         self, takes: set[Item], makes: set[Item], speed: float, item: Item
@@ -409,12 +448,8 @@ class BaseBuilding:
     def limit_waste(
         self, takes: set[Item], makes: set[Item], speed: float, allocation: Ivec
     ) -> Ivec:
-        # TODO approx
-        wants = self.get_ips(None, None, takes, makes, speed).take
-        ratio = min(
-            (allocation[i] / w for i, w in wants.data.items() if w > 0.0), default=0.0
-        )
-        return wants.smul(ratio)
+        take, _make = self.allocate_ips(takes, makes, speed, allocation)
+        return take
 
     def back_pressure(
         self,
@@ -425,11 +460,20 @@ class BaseBuilding:
         item: Item,
         ratio: float,
     ) -> Ivec:
-        # TODO hmm doesnt it always mean just ratio? assuming it was tight before?
-        # no, for multicrafting, much more difficult
-        if item in makes:
-            return allocation.smul(ratio)
-        return allocation
+        # TODO almost the same as allocate_ips?
+        # move up until something hits a ceiling? and then rest, until locked?
+        # could we generalize that into allocate? not just allocate is a constraint
+        # but also and/or produce? might be easier to just write 2 version of this
+        # ah no allocation is always a constraint, but produce only sometimes
+        # might fit into one function then? or maybe even use easy infs, seems to work
+        # keep all on inf, except the make of item, put to ratio, run again
+        # easy first try
+        _take, make = self.allocate_ips(takes, makes, speed, allocation)
+        # TODO limit is a bit weird, only values that are set are true, others are "inf"
+        # TODO eventually we could do the full limit from the start? not just on one item?
+        limit = ifrom({item: make[item] * ratio})
+        take, _make = self.allocate_ips(takes, makes, speed, allocation, limit)
+        return take
 
     def usage_for(
         self,
