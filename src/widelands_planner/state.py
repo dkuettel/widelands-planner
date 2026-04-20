@@ -191,9 +191,8 @@ class Vec[I]:
         )
 
     def almost_equal(self, other: Vec[I], eps: float) -> bool:
-        return all(abs(self[i] - other[i]) <= eps for i in self.data) or all(
-            abs(self[i] - other[i]) <= eps for i in other.data
-        )
+        items = set(self.data) | set(other.data)
+        return all(abs(self[i] - other[i]) <= eps for i in items)
 
     def min(self) -> float:
         # TODO very ambigous, and default too
@@ -237,16 +236,6 @@ class Crafting:
 
     def __post_init__(self):
         assert self.seconds[0] <= self.seconds[1]
-
-    def takes_ips(self, speed: float) -> Ivec:
-        short, long = self.seconds
-        seconds = speed * short + (1 - speed) * long
-        return self.take.sdiv(seconds)
-
-    def makes_ips(self, speed: float) -> Ivec:
-        short, long = self.seconds
-        seconds = speed * short + (1 - speed) * long
-        return self.make.sdiv(seconds)
 
 
 @dataclass(frozen=True)
@@ -354,6 +343,23 @@ class BaseBuilding:
             )
         ]
 
+    def take_make_ips_from_craftings(
+        self, craftings: Sequence[Crafting], speed: float
+    ) -> tuple[Ivec, Ivec]:
+        if len(craftings) == 0:
+            return izeros(), izeros()
+        dt: float = 0.0
+        take: Ivec = izeros()
+        make: Ivec = izeros()
+        for crafting in craftings:
+            short, long = crafting.seconds
+            dt += speed * short + (1 - speed) * long
+            take = take.add(crafting.take)
+            make = make.add(crafting.make)
+        dt += self.pause
+        assert dt > 0
+        return take.sdiv(dt), make.sdiv(dt)
+
     def produces_ips(
         self,
         takes: set[Item],
@@ -364,31 +370,41 @@ class BaseBuilding:
         # TODO make preferences, two level, fill first level first, like in the bakery
         # TODO actually we can only control the takes, not the makes, right?
         craftings: list[Crafting] = self.get_enabled_craftings(takes, makes)
-        total_make_ips: Ivec = izeros()
-        used: float = 0.0
+        craftings = [
+            c for c in craftings if c.take.nonzero_items() <= allocation.nonzero_items()
+        ]
+        total_make_ips = izeros()
+        used = 0.0
         while used < 1.0 and len(craftings) > 0:
-            take_ips: Ivec = isum(c.takes_ips(speed) for c in craftings)
-            make_ips: Ivec = isum(c.makes_ips(speed) for c in craftings)
-            constraint_item: Item | None = min(
-                take_ips.nonzero_items(),
-                key=lambda i: allocation[i] / take_ips[i],
-                default=None,
+            take_ips, make_ips = self.take_make_ips_from_craftings(craftings, speed)
+            constraints = (
+                (item, allocation[item] / ips)
+                for item, ips in take_ips.data.items()
+                if ips > 0.0
             )
-            possible_use: float
-            match constraint_item:
-                case Item(item):
-                    craftings = [c for c in craftings if c.take[item] <= 0.0]
-                    possible_use = allocation[item] / take_ips[item]
-                case None:
-                    possible_use = 1.0
-            old_used, used = used, min(used + possible_use, 1.0)
-            total_make_ips = total_make_ips.add(make_ips.smul(used - old_used))
+            item, ratio = min(constraints, key=lambda x: x[1], default=(None, 1.0))
+            old_used, used = used, min(used + ratio, 1.0)
+            ratio = used - old_used
+            allocation = allocation.sub(take_ips.smul(ratio))
+            if item is not None:
+                allocation.data[item] = 0.0
+            total_make_ips = total_make_ips.add(make_ips.smul(ratio))
+            craftings = [
+                c
+                for c in craftings
+                if c.take.nonzero_items() <= allocation.nonzero_items()
+            ]
         return total_make_ips
 
     def wants_ips(
         self, takes: set[Item], makes: set[Item], speed: float, item: Item
     ) -> float:
-        return self.get_ips(None, None, takes, makes, speed).take[item]
+        # TODO should it be based on current allocation?
+        craftings: list[Crafting] = self.get_enabled_craftings(takes, makes)
+        candidates = (
+            self.take_make_ips_from_craftings([c], speed)[0][item] for c in craftings
+        )
+        return max(candidates, default=0.0)
 
     def limit_waste(
         self, takes: set[Item], makes: set[Item], speed: float, allocation: Ivec
@@ -1526,11 +1542,12 @@ def boost(counts: list[BuildingCount], allocations: list[Ivec]) -> list[Ivec]:
                 for allocation, demand in zip(allocations, demands, strict=True)
             ]
         convergence = all(
-            a.almost_equal(b, 0.1 / 60)
+            a.almost_equal(b, 0.01 / 60)
             for a, b in zip(previous_allocations, allocations, strict=True)
         )
         if convergence:
             return allocations
+    print("boosting didnt converge")
     return allocations
 
 
@@ -1562,11 +1579,12 @@ def back_pressure(counts: list[BuildingCount], allocations: list[Ivec]) -> list[
                 for count, allocation in zip(counts, allocations, strict=True)
             ]
         convergence = all(
-            a.almost_equal(b, 0.1 / 60)
+            a.almost_equal(b, 0.01 / 60)
             for a, b in zip(previous_allocations, allocations, strict=True)
         )
         if convergence:
             return allocations
+    print("pressure didnt converge")
     return allocations
 
 
@@ -1591,7 +1609,7 @@ def fixpoint(
         allocations = boost(counts, allocations)
         allocations = back_pressure(counts, allocations)
         convergence = all(
-            a.almost_equal(b, 0.1 / 60)
+            a.almost_equal(b, 0.01 / 60)
             for a, b in zip(previous_allocations, allocations, strict=True)
         )
         if convergence:
