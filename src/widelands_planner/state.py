@@ -1682,7 +1682,7 @@ class Allocated:
 
 def fixpoint(
     blocks: list[Block],
-) -> Iterator[tuple[bool | str, list[tuple[BuildingCount, Ivec]]]]:
+) -> Iterator[tuple[bool | str, list[tuple[BuildingCount, tuple[Ivec, Ivec]]]]]:
     allocated = [
         Allocated(
             block=block,
@@ -1695,10 +1695,8 @@ def fixpoint(
     ]
 
     # TODO convert allocations into a kind of usage?
-    def flatten_allocations() -> list[tuple[BuildingCount, Ivec]]:
-        return [
-            (alloc.building, isum([alloc.local, alloc.remote])) for alloc in allocated
-        ]
+    def flatten_allocations() -> list[tuple[BuildingCount, tuple[Ivec, Ivec]]]:
+        return [(alloc.building, (alloc.local, alloc.remote)) for alloc in allocated]
 
     if len(allocated) == 0:
         yield True, []
