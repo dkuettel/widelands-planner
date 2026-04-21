@@ -235,7 +235,7 @@ def st_ivec(ivec: state.Ivec, hints: bool):
     st.table(  # pyright: ignore[reportUnknownMemberType]
         df.style.format(
             {
-                "i/min": "{:.1f}",
+                "i/min": "{:.2f}",
                 "repr": lambda v: (
                     f"{v:.0f}%"
                     if (not hints or v <= 100)  # pyright: ignore[reportOperatorIssue]
