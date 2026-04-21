@@ -1585,11 +1585,7 @@ def flood_forward(counts: list[BuildingCount], allocations: list[Ivec]) -> list[
                 allocation.add(ifrom({item: demand * can}))
                 for allocation, demand in zip(allocations, demands, strict=True)
             ]
-        convergence = all(
-            a.almost_equal(b, 0.01 / 60)
-            for a, b in zip(previous_allocations, allocations, strict=True)
-        )
-        if convergence:
+        if have_allocations_converged(previous_allocations, allocations):
             return allocations
     print("boosting didnt converge")
     return allocations
@@ -1622,14 +1618,14 @@ def back_pressure(counts: list[BuildingCount], allocations: list[Ivec]) -> list[
                 count.back_pressure(allocation, item, ratio)
                 for count, allocation in zip(counts, allocations, strict=True)
             ]
-        convergence = all(
-            a.almost_equal(b, 0.01 / 60)
-            for a, b in zip(previous_allocations, allocations, strict=True)
-        )
-        if convergence:
+        if have_allocations_converged(previous_allocations, allocations):
             return allocations
     print("pressure didnt converge")
     return allocations
+
+
+def have_allocations_converged(aa: list[Ivec], bb: list[Ivec]) -> bool:
+    return all(a.almost_equal(b, 0.01 / 60) for a, b in zip(aa, bb, strict=True))
 
 
 def fixpoint(
@@ -1652,11 +1648,7 @@ def fixpoint(
         previous_allocations = allocations
         allocations = flood_forward(counts, allocations)
         allocations = back_pressure(counts, allocations)
-        convergence = all(
-            a.almost_equal(b, 0.01 / 60)
-            for a, b in zip(previous_allocations, allocations, strict=True)
-        )
-        if convergence:
+        if have_allocations_converged(previous_allocations, allocations):
             # TODO ah but we dont see the productions, so thats why we dont see water, doesnt mean its broken at that point
             # maybe still bakery is the problem?
             yield str(_), list(zip(counts, allocations, strict=True))
