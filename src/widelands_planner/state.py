@@ -1662,7 +1662,6 @@ def fixpoint(
 
     for _ in range(20):
         yield False, flatten_allocations()
-        # TODO are we now in-place or not? we cant compare if we do in-place
         previous_allocations = allocations
         allocations = flood_forward(allocations)
         allocations = back_pressure(allocations)
