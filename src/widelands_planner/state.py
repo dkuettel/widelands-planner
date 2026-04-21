@@ -19,6 +19,8 @@ from qpsolvers import (
 from qpsolvers.problem import Problem
 from torch import Tensor, nn
 
+sip = partial(zip, strict=True)
+
 
 class Item(StrEnum):
     bread = "bread"
@@ -1548,111 +1550,124 @@ def qp(blocks: list[Block]) -> tuple[list[str], Solution] | None:
     return [var.desc for var in vars], solution
 
 
-def get_production(counts: list[BuildingCount], allocations: list[Ivec]) -> Ivec:
-    production: Ivec = izeros()
-    for count, allocation in zip(counts, allocations, strict=True):
-        production = production.add(count.produces_ips(allocation))
-    return production
+def consumption_from_allocated(allocated: list[Allocated]) -> Ivec:
+    return isum(alloc.total() for alloc in allocated)
 
 
-def get_consumption(counts: list[BuildingCount], usages: list[float]) -> Ivec:
-    consumption = izeros()
-    for count, usage in zip(counts, usages, strict=True):
-        consumption = consumption.add(count.takes_ips().smul(usage))
-    return consumption
+def production_from_allocated(allocated: list[Allocated]) -> Ivec:
+    return isum(alloc.building.produces_ips(alloc.total()) for alloc in allocated)
 
 
-def flood_forward(counts: list[BuildingCount], allocations: list[Ivec]) -> list[Ivec]:
+def flood_forward(allocated: list[Allocated]) -> list[Allocated]:
     for _ in range(20):
-        previous_allocations = allocations
-        consumption = isum(allocations)
-        production = isum(
-            count.produces_ips(allocation)
-            for count, allocation in zip(counts, allocations, strict=True)
-        )
+        prev_allocated = allocated
+        consumption = consumption_from_allocated(allocated)
+        production = production_from_allocated(allocated)
         for item in Item:
             surplus = production[item] - consumption[item]
             if surplus <= 0.0:
                 continue
             demands = [
-                count.wants_ips(item) - allocation[item]
-                for count, allocation in zip(counts, allocations, strict=True)
+                alloc.building.wants_ips(item) - alloc.total()[item]
+                for alloc in allocated
             ]
             demand = sum(demands)
             if demand <= 0.0:
                 continue
             can = min(surplus / demand, 1.0)
-            allocations = [
-                allocation.add(ifrom({item: demand * can}))
-                for allocation, demand in zip(allocations, demands, strict=True)
+            allocated = [
+                alloc.__replace__(remote=alloc.remote.add(ifrom({item: demand * can})))
+                for alloc, demand in sip(allocated, demands)
             ]
-        if have_allocations_converged(previous_allocations, allocations):
-            return allocations
+        if have_allocations_converged(prev_allocated, allocated):
+            return allocated
     print("boosting didnt converge")
-    return allocations
+    return allocated
 
 
-def back_pressure(counts: list[BuildingCount], allocations: list[Ivec]) -> list[Ivec]:
+def back_pressure(allocated: list[Allocated]) -> list[Allocated]:
     for _ in range(20):
-        previous_allocations = allocations
-        # TODO this might have to happen only once? not sure with nonlinear craftings
-        # should we combine this into backpressure?
-        allocations = [
-            count.limit_waste(allocation)
-            for count, allocation in zip(counts, allocations, strict=True)
+        prev_allocated = allocated
+        allocated = [
+            # TODO limit_waste might have to happen only once? not sure with nonlinear craftings
+            # should we combine this into backpressure?
+            alloc.__replace__(remote=alloc.building.limit_waste(alloc.total()))
+            for alloc in allocated
         ]
-        consumption = isum(allocations)
-        production = isum(
-            count.produces_ips(allocation)
-            for count, allocation in zip(counts, allocations, strict=True)
-        )
+        consumption = consumption_from_allocated(allocated)
+        production = production_from_allocated(allocated)
         for item in Item:
-            # TODO here, how to manage roots where we dont want to limit? like with opt
-            # if item is Item.log or item not in consumption.data:
+            # TODO should it be a setting what we want to have unlimited?
             if item not in consumption.data:
                 continue
             surplus = production[item] - consumption[item]
             if surplus <= 0.0:
                 continue
             ratio = consumption[item] / production[item]
-            allocations = [
-                count.back_pressure(allocation, item, ratio)
-                for count, allocation in zip(counts, allocations, strict=True)
+            allocated = [
+                alloc.__replace__(
+                    remote=alloc.building.back_pressure(alloc.total(), item, ratio)
+                )
+                for alloc in allocated
             ]
-        if have_allocations_converged(previous_allocations, allocations):
-            return allocations
+        if have_allocations_converged(prev_allocated, allocated):
+            return allocated
     print("pressure didnt converge")
-    return allocations
+    return allocated
 
 
-def have_allocations_converged(aa: list[Ivec], bb: list[Ivec]) -> bool:
-    return all(a.almost_equal(b, 0.01 / 60) for a, b in zip(aa, bb, strict=True))
+# TODO assumes those two are parallel and zip
+def have_allocations_converged(a: list[Allocated], b: list[Allocated]) -> bool:
+    return all(
+        i.local.almost_equal(j.local, 0.01 / 60)
+        and i.remote.almost_equal(j.remote, 0.01 / 60)
+        for i, j in zip(a, b, strict=True)
+    )
+
+
+@dataclass(frozen=True)
+class Allocated:
+    block: Block
+    building: BuildingCount
+    local: Ivec
+    remote: Ivec
+
+    def total(self) -> Ivec:
+        return isum([self.local, self.remote])
 
 
 def fixpoint(
     blocks: list[Block],
 ) -> Iterator[tuple[bool | str, list[tuple[BuildingCount, Ivec]]]]:
-    counts = [count for block in blocks for count in block.buildings]
-    if len(counts) == 0:
+    allocations = [
+        Allocated(
+            block=block,
+            building=building,
+            local=izeros(),
+            remote=izeros(),
+        )
+        for block in blocks
+        for building in block.buildings
+    ]
+
+    # TODO convert allocations into a kind of usage?
+    def flatten_allocations() -> list[tuple[BuildingCount, Ivec]]:
+        return [
+            (alloc.building, isum([alloc.local, alloc.remote])) for alloc in allocations
+        ]
+
+    if len(allocations) == 0:
         yield True, []
         return
 
-    # TODO need to introduce blocks, and fulfil locally first
-    # backpressure similar? its a bit messy. and allocations need to be local vs global too
-    # btw, whats a good way to identify a block vs describing it?
-    # pass the desc and have a .id? just for fun its interesting, when to use handle, when to use thing
-    allocations = [izeros() for _ in counts]
-
     for _ in range(20):
-        # TODO convert allocations into a kind of usage?
-        yield False, list(zip(counts, allocations, strict=True))
+        yield False, flatten_allocations()
+        # TODO are we now in-place or not? we cant compare if we do in-place
         previous_allocations = allocations
-        allocations = flood_forward(counts, allocations)
-        allocations = back_pressure(counts, allocations)
+        allocations = flood_forward(allocations)
+        allocations = back_pressure(allocations)
         if have_allocations_converged(previous_allocations, allocations):
-            # TODO ah but we dont see the productions, so thats why we dont see water, doesnt mean its broken at that point
-            # maybe still bakery is the problem?
-            yield str(_), list(zip(counts, allocations, strict=True))
+            yield True, flatten_allocations()
             return
 
-    yield False, list(zip(counts, allocations, strict=True))
+    yield False, flatten_allocations()
