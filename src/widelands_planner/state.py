@@ -132,6 +132,11 @@ class Vec[I]:
         items = {i for r in rates for i in r.data}
         return cls(ty, {i: sum(r[i] for r in rates) for i in items})
 
+    def updated(self, updates: Mapping[I, float]) -> Vec[I]:
+        v = Vec(self.ty, dict(self.data))
+        v.data.update(updates)
+        return v
+
     def sorted(self) -> Iterator[tuple[I, float]]:
         for k, v in sorted(self.data.items()):
             if v != 0:
@@ -1576,7 +1581,10 @@ def flood_forward(allocated: list[Allocated]) -> list[Allocated]:
                 continue
             can = min(surplus / demand, 1.0)
             allocated = [
-                alloc.__replace__(remote=alloc.remote.add(ifrom({item: demand * can})))
+                alloc.__replace__(
+                    remote=alloc.total().add(ifrom({item: demand * can})),
+                    local=izeros(),
+                )
                 for alloc, demand in sip(allocated, demands)
             ]
         if have_allocations_converged(prev_allocated, allocated):
@@ -1585,13 +1593,49 @@ def flood_forward(allocated: list[Allocated]) -> list[Allocated]:
     return allocated
 
 
+def prefer_local(allocated: list[Allocated]) -> list[Allocated]:
+    block_ids = {id(alloc.block) for alloc in allocated}
+    allocated = list(allocated)
+    for block_id in block_ids:
+        block_allocated_ids = [
+            i for i, alloc in enumerate(allocated) if id(alloc.block) == block_id
+        ]
+        block_allocated = [allocated[i] for i in block_allocated_ids]
+        block_consumption = consumption_from_allocated(block_allocated)
+        block_production = production_from_allocated(block_allocated)
+        for item in Item:
+            if block_consumption[item] <= 0.0:
+                continue
+            ratio = block_production[item] / block_consumption[item]
+            ratio = min(ratio, 1.0)
+            for i in block_allocated_ids:
+                remote = allocated[i].remote
+                local = allocated[i].local
+                total = allocated[i].total()
+                allocated[i] = allocated[i].__replace__(
+                    remote=remote.updated({item: (1.0 - ratio) * total[item]}),
+                    local=local.updated({item: ratio * total[item]}),
+                )
+    return allocated
+
+
+def back_reallocated(alloc: Allocated, limit: Ivec) -> Allocated:
+    total = alloc.total()
+    local = ifrom({i: min(v, limit[i]) for i, v in alloc.local.data.items()})
+    remote = total.sub(local)
+    return alloc.__replace__(
+        local=local,
+        remote=remote,
+    )
+
+
 def back_pressure(allocated: list[Allocated]) -> list[Allocated]:
     for _ in range(20):
         prev_allocated = allocated
         allocated = [
             # TODO limit_waste might have to happen only once? not sure with nonlinear craftings
             # should we combine this into backpressure?
-            alloc.__replace__(remote=alloc.building.limit_waste(alloc.total()))
+            back_reallocated(alloc, alloc.building.limit_waste(alloc.total()))
             for alloc in allocated
         ]
         consumption = consumption_from_allocated(allocated)
@@ -1605,8 +1649,8 @@ def back_pressure(allocated: list[Allocated]) -> list[Allocated]:
                 continue
             ratio = consumption[item] / production[item]
             allocated = [
-                alloc.__replace__(
-                    remote=alloc.building.back_pressure(alloc.total(), item, ratio)
+                back_reallocated(
+                    alloc, alloc.building.back_pressure(alloc.total(), item, ratio)
                 )
                 for alloc in allocated
             ]
@@ -1639,7 +1683,7 @@ class Allocated:
 def fixpoint(
     blocks: list[Block],
 ) -> Iterator[tuple[bool | str, list[tuple[BuildingCount, Ivec]]]]:
-    allocations = [
+    allocated = [
         Allocated(
             block=block,
             building=building,
@@ -1653,19 +1697,20 @@ def fixpoint(
     # TODO convert allocations into a kind of usage?
     def flatten_allocations() -> list[tuple[BuildingCount, Ivec]]:
         return [
-            (alloc.building, isum([alloc.local, alloc.remote])) for alloc in allocations
+            (alloc.building, isum([alloc.local, alloc.remote])) for alloc in allocated
         ]
 
-    if len(allocations) == 0:
+    if len(allocated) == 0:
         yield True, []
         return
 
     for _ in range(20):
         yield False, flatten_allocations()
-        previous_allocations = allocations
-        allocations = flood_forward(allocations)
-        allocations = back_pressure(allocations)
-        if have_allocations_converged(previous_allocations, allocations):
+        prev_allocated = allocated
+        allocated = flood_forward(allocated)
+        allocated = prefer_local(allocated)
+        allocated = back_pressure(allocated)
+        if have_allocations_converged(prev_allocated, allocated):
             yield True, flatten_allocations()
             return
 
