@@ -468,6 +468,7 @@ class BaseBuilding:
         # might fit into one function then? or maybe even use easy infs, seems to work
         # keep all on inf, except the make of item, put to ratio, run again
         # easy first try
+        # TODO also need to consider the output that we dont consider for backpressure
         _take, make = self.allocate_ips(takes, makes, speed, allocation)
         # TODO limit is a bit weird, only values that are set are true, others are "inf"
         # TODO eventually we could do the full limit from the start? not just on one item?
