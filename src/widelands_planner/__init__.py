@@ -1,3 +1,6 @@
+from collections import deque
+from collections.abc import Iterable
+
 from widelands_planner.state import (
     Block,
     Bname,
@@ -263,14 +266,18 @@ def setup4() -> list[Block]:
     return blocks
 
 
+def last[T](it: Iterable[T]) -> T:
+    [last] = deque(it, maxlen=1)
+    return last
+
+
 def test():
     # blocks = setup1()
     # blocks = setup2()
     # blocks = setup3()
     blocks = setup4()
 
-    for opt, solution in fixpoint(blocks):
-        pass
+    opt, solution = last(fixpoint(blocks))
 
     print(opt)
 
