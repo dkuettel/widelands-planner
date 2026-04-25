@@ -175,10 +175,99 @@ def setup3() -> list[Block]:
     return [block1, block2]
 
 
+def setup4() -> list[Block]:
+    buildings = get_buildings()
+    blocks: list[Block] = []
+    for _ in range(2):
+        blocks.append(
+            Block(
+                imports=set(),
+                buildings=[
+                    BuildingCount(
+                        3,
+                        ConfiguredGenericBuilding(
+                            buildings[Bname.foresters_house],
+                            takes=set(),
+                            makes={Item.tree},
+                            speed=1.0,
+                        ),
+                    ),
+                    BuildingCount(
+                        3,
+                        ConfiguredGenericBuilding(
+                            buildings[Bname.woodcutters_house],
+                            takes={Item.tree},
+                            makes={Item.log},
+                            speed=1.0,
+                        ),
+                    ),
+                    BuildingCount(
+                        4,
+                        ConfiguredGenericBuilding(
+                            buildings[Bname.fishers_house],
+                            takes=set(),
+                            makes={Item.fish},
+                            speed=1.0,
+                        ),
+                    ),
+                    BuildingCount(
+                        2,
+                        ConfiguredGenericBuilding(
+                            buildings[Bname.smokery],
+                            takes={Item.fish, Item.log},
+                            makes={Item.smoked_fish},
+                            speed=1.0,
+                        ),
+                    ),
+                    BuildingCount(
+                        1,
+                        ConfiguredGenericBuilding(
+                            buildings[Bname.farm],
+                            takes=set(),
+                            makes={Item.barley},
+                            speed=1.0,
+                        ),
+                    ),
+                    BuildingCount(
+                        1,
+                        ConfiguredGenericBuilding(
+                            buildings[Bname.bakery],
+                            takes={Item.barley, Item.water},
+                            makes={Item.bread},
+                            speed=1.0,
+                        ),
+                    ),
+                    BuildingCount(
+                        1,
+                        ConfiguredGenericBuilding(
+                            buildings[Bname.well],
+                            takes=set(),
+                            makes={Item.water},
+                            speed=1.0,
+                        ),
+                    ),
+                    BuildingCount(
+                        6,
+                        ConfiguredGenericBuilding(
+                            buildings[Bname.tavern],
+                            takes={Item.smoked_fish, Item.bread},
+                            makes={Item.ration},
+                            speed=1.0,
+                        ),
+                    ),
+                ],
+                exports=set(),
+            )
+        )
+
+    return blocks
+
+
 def test():
     # blocks = setup1()
     # blocks = setup2()
-    blocks = setup3()
+    # blocks = setup3()
+    blocks = setup4()
 
     for opt, solution in fixpoint(blocks):
         pass
