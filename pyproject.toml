@@ -16,7 +16,7 @@ dependencies = [
 ]
 
 [project.scripts]
-wplan = "widelands_planner:main"
+test = "widelands_planner:test"
 
 [build-system]
 requires = ["uv_build>=0.9.29,<0.10.0"]
