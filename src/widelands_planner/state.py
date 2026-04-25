@@ -1647,6 +1647,8 @@ def back_pressure(allocated: list[Allocated]) -> list[Allocated]:
             # TODO because we dont treat None vs 0.0 very well, I have this hack for now
             if consumption[item] == 0.0:
                 continue
+            # TODO hm im not sure if it is necessary to route backpressure thru local and global?
+            # it might converge faster? but sofar the solutions seem right
             surplus = production[item] - consumption[item]
             if surplus <= 0.0:
                 continue
