@@ -1620,9 +1620,11 @@ def prefer_local(allocated: list[Allocated]) -> list[Allocated]:
 
 
 def back_reallocated(alloc: Allocated, limit: Ivec) -> Allocated:
-    total = alloc.total()
-    local = ifrom({i: min(v, limit[i]) for i, v in alloc.local.data.items()})
-    remote = total.sub(local)
+    # TODO as soon as I do this, trivial cases dont work anymore
+    # ok I think backpressure has to respect assignment correctly
+    # but in a way, this here shouldnt have broken trivial cases?
+    local = ifrom({i: min(alloc.local[i], limit[i]) for i in Item})
+    remote = limit.sub(local)
     return alloc.__replace__(
         local=local,
         remote=remote,
@@ -1642,7 +1644,8 @@ def back_pressure(allocated: list[Allocated]) -> list[Allocated]:
         production = production_from_allocated(allocated)
         for item in Item:
             # TODO should it be a setting what we want to have unlimited?
-            if item not in consumption.data:
+            # TODO because we dont treat None vs 0.0 very well, I have this hack for now
+            if consumption[item] == 0.0:
                 continue
             surplus = production[item] - consumption[item]
             if surplus <= 0.0:
