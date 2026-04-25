@@ -1,5 +1,9 @@
+from __future__ import annotations
+
 from collections import deque
 from collections.abc import Iterable
+
+from tabulate import tabulate
 
 from widelands_planner.state import (
     Block,
@@ -10,6 +14,7 @@ from widelands_planner.state import (
     Ivec,
     fixpoint,
     get_buildings,
+    isum,
 )
 
 
@@ -205,7 +210,7 @@ def setup4() -> list[Block]:
                         ),
                     ),
                     BuildingCount(
-                        4,
+                        40,
                         ConfiguredGenericBuilding(
                             buildings[Bname.fishers_house],
                             takes=set(),
@@ -271,6 +276,19 @@ def last[T](it: Iterable[T]) -> T:
     return last
 
 
+def str_from_ivec(vec: Ivec) -> str:
+    data = [f"{i.name}: {v:.2f}" for i, v in vec.data.items() if v != 0.0]
+    return "{" + ", ".join(data) + "}"
+
+
+def str_from_usage(usage: float | None) -> str:
+    match usage:
+        case float() | int():
+            return f"{round(usage * 100)}%"
+        case None:
+            return "None"
+
+
 def test():
     # blocks = setup1()
     # blocks = setup2()
@@ -281,10 +299,19 @@ def test():
 
     print(opt)
 
-    def str_from_ivec(vec: Ivec) -> str:
-        data = [f"{i.name}: {v:.2f}" for i, v in vec.data.items() if v != 0.0]
-        return "{" + ", ".join(data) + "}"
-
-    for count, (local, remote) in solution:
-        name = count.building.building.name
-        print(name, str_from_ivec(local), str_from_ivec(remote))
+    for i, block in enumerate(blocks):
+        ids = {id(building) for building in block.buildings}
+        data = [
+            (
+                count.count,
+                str_from_usage(usage),
+                count.building.building.name,
+                str_from_ivec(local),
+                str_from_ivec(remote),
+            )
+            for count, usage, (local, remote) in solution
+            if id(count) in ids
+        ]
+        print()
+        print(f"block {i}:")
+        print(tabulate(data))

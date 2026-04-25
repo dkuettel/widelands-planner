@@ -374,7 +374,7 @@ class BaseBuilding:
         speed: float,
         allocation: Ivec,
     ) -> Ivec:
-        _take, make = self.allocate_ips(takes, makes, speed, allocation)
+        _take, make, _used = self.allocate_ips(takes, makes, speed, allocation)
         return make
 
     def allocate_ips(
@@ -384,11 +384,15 @@ class BaseBuilding:
         speed: float,
         allocation: Ivec,
         limit: Ivec | None = None,
-    ) -> tuple[Ivec, Ivec]:
-        # NOTE limit is interpreted as limit only when value set
-        # unset values are "inf"
+    ) -> tuple[Ivec, Ivec, float]:
+        # NOTE limit is interpreted as limit only when value set unset values are "inf"
         if limit is None:
-            limit = izeros()
+            limit = ifrom({i: math.inf for i in Item})
+        else:
+            limit = ifrom(
+                {i: (limit[i] if i in limit.data else math.inf) for i in Item}
+            )
+        assert all(v >= 0.0 for v in limit.data.values()), limit
         # TODO make preferences, two level, fill first level first, like in the bakery
         # TODO actually we can only control the takes, not the makes, right?
         craftings: list[Crafting] = self.get_enabled_craftings(takes, makes)
@@ -422,13 +426,22 @@ class BaseBuilding:
                 limit_constraints, key=lambda x: x[1], default=(None, 1.0)
             )
             ratio = min(allocation_ratio, limit_ratio)
+            assert 0 <= ratio, (
+                allocation_item,
+                allocation_ratio,
+                limit_item,
+                limit_ratio,
+            )
             old_used, used = used, min(used + ratio, 1.0)
             ratio = used - old_used
             allocation = allocation.sub(take_ips.smul(ratio))
-            if allocation_item is not None:
+            if allocation_item is not None and ratio == allocation_ratio:
                 allocation.data[allocation_item] = 0.0
-            if limit_item is not None:
+            assert all(v >= 0.0 for v in allocation.data.values()), allocation
+            limit = limit.sub(make_ips.smul(ratio))
+            if limit_item is not None and ratio == limit_ratio:
                 limit.data[limit_item] = 0.0
+            assert all(v >= 0.0 for v in limit.data.values()), limit
             total_take_ips = total_take_ips.add(take_ips.smul(ratio))
             total_make_ips = total_make_ips.add(make_ips.smul(ratio))
             craftings = [
@@ -440,7 +453,8 @@ class BaseBuilding:
                     & {i for i, v in limit.data.items() if v == 0.0}
                 )
             ]
-        return total_take_ips, total_make_ips
+        assert 0 <= used <= 1.0, used
+        return total_take_ips, total_make_ips, used
 
     def wants_ips(
         self, takes: set[Item], makes: set[Item], speed: float, item: Item
@@ -455,7 +469,7 @@ class BaseBuilding:
     def limit_waste(
         self, takes: set[Item], makes: set[Item], speed: float, allocation: Ivec
     ) -> Ivec:
-        take, _make = self.allocate_ips(takes, makes, speed, allocation)
+        take, _make, _used = self.allocate_ips(takes, makes, speed, allocation)
         return take
 
     def back_pressure(
@@ -476,39 +490,23 @@ class BaseBuilding:
         # keep all on inf, except the make of item, put to ratio, run again
         # easy first try
         # TODO also need to consider the output that we dont consider for backpressure
-        _take, make = self.allocate_ips(takes, makes, speed, allocation)
+        _take, make, _used = self.allocate_ips(takes, makes, speed, allocation)
         # TODO limit is a bit weird, only values that are set are true, others are "inf"
         # TODO eventually we could do the full limit from the start? not just on one item?
         limit = ifrom({item: make[item] * ratio})
-        take, _make = self.allocate_ips(takes, makes, speed, allocation, limit)
+        take, _make, _used = self.allocate_ips(takes, makes, speed, allocation, limit)
         return take
 
     def usage_for(
         self,
         allocation: Ivec,
+        limit: Ivec,
         takes: set[Item],
         makes: set[Item],
         speed: float,
     ) -> float:
-        # TODO approx for now
-        wants = self.get_ips(None, None, takes, makes, speed).take
-        return min(
-            (allocation[i] / w for i, w in wants.data.items() if w > 0.0), default=1.0
-        )
-
-    # TODO would be easier to say wants total? not sure how much it depends on state really
-    def wants_extra_ips(
-        self,
-        usage: float,
-        item: Item,
-        allocation: Ivec,
-        takes: set[Item],
-        makes: set[Item],
-        speed: float,
-    ):
-        # TODO also very approx
-        take = self.get_ips(None, None, takes, makes, speed).take.smul(usage)[item]
-        return take - allocation[item]
+        _take, _make, used = self.allocate_ips(takes, makes, speed, allocation, limit)
+        return used
 
     def get_constraints(
         self,
@@ -625,8 +623,10 @@ class ConfiguredGenericBuilding:
             self.takes, self.makes, self.speed, allocation, item, ratio
         )
 
-    def usage_for(self, allocation: Ivec) -> float:
-        return self.building.usage_for(allocation, self.takes, self.makes, self.speed)
+    def usage_for(self, allocation: Ivec, limit: Ivec) -> float:
+        return self.building.usage_for(
+            allocation, limit, self.takes, self.makes, self.speed
+        )
 
     def takes_ips(self, take: Ivec | None = None, make: Ivec | None = None) -> Ivec:
         return self.building.takes_ips(take, make, self.takes, self.makes, self.speed)
@@ -662,6 +662,13 @@ class BuildingCount:
 
     def needs_ips(self, usage: float) -> Ivec:
         return self.building.needs_ips(usage).smul(self.count)
+
+    def usage_for(self, allocation: Ivec, limit: Ivec) -> float:
+        if self.count == 0:
+            return 0.0
+        return self.building.usage_for(
+            allocation.sdiv(self.count), limit.sdiv(self.count)
+        )
 
     def produces_ips(self, allocation: Ivec) -> Ivec:
         if self.count == 0:
@@ -1619,15 +1626,19 @@ def prefer_local(allocated: list[Allocated]) -> list[Allocated]:
     return allocated
 
 
-def back_reallocated(alloc: Allocated, limit: Ivec) -> Allocated:
+def back_reallocated(
+    alloc: Allocated, limit: Ivec, out_limit: None | Ivec
+) -> Allocated:
     # TODO as soon as I do this, trivial cases dont work anymore
     # ok I think backpressure has to respect assignment correctly
     # but in a way, this here shouldnt have broken trivial cases?
     local = ifrom({i: min(alloc.local[i], limit[i]) for i in Item})
     remote = limit.sub(local)
+    total = isum([local, remote])
     return alloc.__replace__(
         local=local,
         remote=remote,
+        usage=None if out_limit is None else alloc.building.usage_for(total, out_limit),
     )
 
 
@@ -1637,7 +1648,7 @@ def back_pressure(allocated: list[Allocated]) -> list[Allocated]:
         allocated = [
             # TODO limit_waste might have to happen only once? not sure with nonlinear craftings
             # should we combine this into backpressure?
-            back_reallocated(alloc, alloc.building.limit_waste(alloc.total()))
+            back_reallocated(alloc, alloc.building.limit_waste(alloc.total()), None)
             for alloc in allocated
         ]
         consumption = consumption_from_allocated(allocated)
@@ -1655,7 +1666,21 @@ def back_pressure(allocated: list[Allocated]) -> list[Allocated]:
             ratio = consumption[item] / production[item]
             allocated = [
                 back_reallocated(
-                    alloc, alloc.building.back_pressure(alloc.total(), item, ratio)
+                    # TODO hm make this more absolute? still need to distribute fairly
+                    # computing usage is difficult if we dont have a final limit when with back-pressure
+                    # also can we infer if a building is limit by backpressure or by input
+                    # because in equilibrium state, they should be the same
+                    # hmm not sure that is the problem currenly, fishery has just one output
+                    # why does it end up with a 1.0 usage?
+                    # hm is it because we only use have_allocations_converged and fisheries' allocations are invariant?
+                    alloc,
+                    alloc.building.back_pressure(alloc.total(), item, ratio),
+                    # TODO this is still messed up, need an easier model
+                    # in the end, usage cannot just be from global consumption, local comes first and is maybe the limit
+                    # ifrom(
+                    #     {item: alloc.building.produces_ips(alloc.total())[item] * ratio}
+                    # ),
+                    None,
                 )
                 for alloc in allocated
             ]
@@ -1680,6 +1705,7 @@ class Allocated:
     building: BuildingCount
     local: Ivec
     remote: Ivec
+    usage: None | float
 
     def total(self) -> Ivec:
         return isum([self.local, self.remote])
@@ -1687,21 +1713,29 @@ class Allocated:
 
 def fixpoint(
     blocks: list[Block],
-) -> Iterator[tuple[bool | str, list[tuple[BuildingCount, tuple[Ivec, Ivec]]]]]:
+) -> Iterator[
+    tuple[bool | str, list[tuple[BuildingCount, float | None, tuple[Ivec, Ivec]]]]
+]:
     allocated = [
         Allocated(
             block=block,
             building=building,
             local=izeros(),
             remote=izeros(),
+            usage=None,
         )
         for block in blocks
         for building in block.buildings
     ]
 
     # TODO convert allocations into a kind of usage?
-    def flatten_allocations() -> list[tuple[BuildingCount, tuple[Ivec, Ivec]]]:
-        return [(alloc.building, (alloc.local, alloc.remote)) for alloc in allocated]
+    def flatten_allocations() -> list[
+        tuple[BuildingCount, float | None, tuple[Ivec, Ivec]]
+    ]:
+        return [
+            (alloc.building, alloc.usage, (alloc.local, alloc.remote))
+            for alloc in allocated
+        ]
 
     if len(allocated) == 0:
         yield True, []
