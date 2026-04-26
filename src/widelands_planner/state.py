@@ -1747,11 +1747,7 @@ class Allocated:
         return isum([self.make_local, self.make_remote])
 
 
-def fixpoint(
-    blocks: list[Block],
-) -> Iterator[
-    tuple[bool | str, list[tuple[BuildingCount, float | None, tuple[Ivec, Ivec]]]]
-]:
+def fixpoint(blocks: list[Block]) -> Iterator[tuple[bool, list[Allocated]]]:
     allocated = [
         Allocated(
             block=block,
@@ -1765,29 +1761,19 @@ def fixpoint(
         for building in block.buildings
     ]
 
-    # TODO convert allocations into a kind of usage?
-    def flatten_allocations() -> list[
-        tuple[BuildingCount, float | None, tuple[Ivec, Ivec]]
-    ]:
-        return [
-            # TODO usage
-            (alloc.building, None, (alloc.take_local, alloc.take_remote))
-            for alloc in allocated
-        ]
-
     if len(allocated) == 0:
         yield True, []
         return
 
     for _ in range(20):
-        yield False, flatten_allocations()
+        yield False, allocated
         prev_allocated = allocated
         allocated = flood_forward(allocated)
         # TODO we could maybe build that into flood_forward eventually?
         allocated = prefer_local(allocated)
         allocated = back_pressure(allocated)
         if have_allocations_converged(prev_allocated, allocated):
-            yield True, flatten_allocations()
+            yield True, allocated
             return
 
-    yield False, flatten_allocations()
+    yield False, allocated

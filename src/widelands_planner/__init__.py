@@ -295,23 +295,34 @@ def test():
     # blocks = setup3()
     blocks = setup4()
 
-    opt, solution = last(fixpoint(blocks))
+    converged, allocated = last(fixpoint(blocks))
 
-    print(opt)
+    if not converged:
+        print("did not converge")
 
     for i, block in enumerate(blocks):
         ids = {id(building) for building in block.buildings}
         data = [
             (
-                count.count,
-                str_from_usage(usage),
-                count.building.building.name,
-                str_from_ivec(local.smul(60)),
-                str_from_ivec(remote.smul(60)),
+                alloc.building.count,
+                str_from_usage(
+                    alloc.building.usage_for(alloc.take_total(), alloc.make_total())
+                ),
+                alloc.building.building.building.name,
+                (
+                    str_from_ivec(alloc.take_local.smul(60))
+                    + " + "
+                    + str_from_ivec(alloc.take_remote.smul(60))
+                ),
+                (
+                    str_from_ivec(alloc.make_local.smul(60))
+                    + " + "
+                    + str_from_ivec(alloc.make_remote.smul(60))
+                ),
             )
-            for count, usage, (local, remote) in solution
-            if id(count) in ids
+            for alloc in allocated
+            if id(alloc.building) in ids
         ]
         print()
         print(f"block {i}:")
-        print(tabulate(data, headers=["#", "%", "name", "local i/m", "remote i/m"]))
+        print(tabulate(data, headers=["#", "%", "name", "take i/m", "make i/m"]))
