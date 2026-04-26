@@ -1610,16 +1610,19 @@ def prefer_local(allocated: list[Allocated]) -> list[Allocated]:
             i for i, alloc in enumerate(allocated) if id(alloc.block) == block_id
         ]
         block_allocated = [allocated[i] for i in block_allocated_ids]
-        # TODO hm but we still sum up local and remote here
         block_consumption = consumption_from_allocated(block_allocated)
         block_production = production_from_allocated(block_allocated)
         for item in Item:
-            if block_consumption[item] <= 0.0:
-                continue
-            ratio_take = block_production[item] / block_consumption[item]
-            ratio_take = min(ratio_take, 1.0)
-            ratio_make = block_consumption[item] / block_production[item]
-            ratio_make = min(ratio_make, 1.0)
+            if block_consumption[item] > 0.0:
+                ratio_take = block_production[item] / block_consumption[item]
+                ratio_take = min(ratio_take, 1.0)
+            else:
+                ratio_take = 0.0
+            if block_production[item] > 0.0:
+                ratio_make = block_consumption[item] / block_production[item]
+                ratio_make = min(ratio_make, 1.0)
+            else:
+                ratio_make = 0.0
             for i in block_allocated_ids:
                 total_take = allocated[i].take_total()
                 total_make = allocated[i].make_total()
