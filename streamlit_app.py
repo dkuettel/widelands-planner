@@ -409,15 +409,15 @@ def main():
         exports = block.exports.get(set())
         blocks.append(state.Block(imports, counts, exports))
 
-    for opt, solution in state.fixpoint(blocks):
-        pass  # NOTE taking only the last one
-    with st.container(border=True, width=800):
-        st.write(opt)  # pyright: ignore[reportPossiblyUnboundVariable]
-        for count, (local, remote) in solution:  # pyright: ignore[reportPossiblyUnboundVariable]
-            st.subheader(count.building.building.name)
-            with st.container(horizontal=True):
-                st_ivec(local, False)
-                st_ivec(remote, False)
+    # for opt, solution in state.fixpoint(blocks):
+    #     pass  # NOTE taking only the last one
+    # with st.container(border=True, width=800):
+    #     st.write(opt)  # pyright: ignore[reportPossiblyUnboundVariable]
+    #     for count, (local, remote) in solution:  # pyright: ignore[reportPossiblyUnboundVariable]
+    #         st.subheader(count.building.building.name)
+    #         with st.container(horizontal=True):
+    #             st_ivec(local, False)
+    #             st_ivec(remote, False)
 
     # match state.qp(blocks):
     #     case None:

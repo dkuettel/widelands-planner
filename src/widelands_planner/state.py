@@ -145,6 +145,9 @@ class Vec[I]:
     def __getitem__(self, i: I) -> float:
         return self.data.get(i, 0)
 
+    def __contains__(self, i: I) -> bool:
+        return i in self.data
+
     def add(self, other: Vec[I]) -> Vec[I]:
         items = self.data.keys() | other.data.keys()
         return Vec(self.ty, {i: (self[i] + other[i]) for i in items})
@@ -155,6 +158,10 @@ class Vec[I]:
 
     def smul(self, s: float) -> Vec[I]:
         return Vec(self.ty, {i: s * v for (i, v) in self.data.items()})
+
+    def mul(self, other: Vec[I]) -> Vec[I]:
+        items = self.data.keys() & other.data.keys()
+        return Vec(self.ty, {i: (self[i] * other[i]) for i in items})
 
     def sdiv(self, s: float) -> Vec[I]:
         return self.smul(1 / s)
@@ -478,22 +485,8 @@ class BaseBuilding:
         makes: set[Item],
         speed: float,
         allocation: Ivec,
-        item: Item,
-        ratio: float,
+        limit: Ivec,
     ) -> Ivec:
-        # TODO almost the same as allocate_ips?
-        # move up until something hits a ceiling? and then rest, until locked?
-        # could we generalize that into allocate? not just allocate is a constraint
-        # but also and/or produce? might be easier to just write 2 version of this
-        # ah no allocation is always a constraint, but produce only sometimes
-        # might fit into one function then? or maybe even use easy infs, seems to work
-        # keep all on inf, except the make of item, put to ratio, run again
-        # easy first try
-        # TODO also need to consider the output that we dont consider for backpressure
-        _take, make, _used = self.allocate_ips(takes, makes, speed, allocation)
-        # TODO limit is a bit weird, only values that are set are true, others are "inf"
-        # TODO eventually we could do the full limit from the start? not just on one item?
-        limit = ifrom({item: make[item] * ratio})
         take, _make, _used = self.allocate_ips(takes, makes, speed, allocation, limit)
         return take
 
@@ -618,9 +611,9 @@ class ConfiguredGenericBuilding:
     def limit_waste(self, allocation: Ivec) -> Ivec:
         return self.building.limit_waste(self.takes, self.makes, self.speed, allocation)
 
-    def back_pressure(self, allocation: Ivec, item: Item, ratio: float) -> Ivec:
+    def back_pressure(self, allocation: Ivec, limit: Ivec) -> Ivec:
         return self.building.back_pressure(
-            self.takes, self.makes, self.speed, allocation, item, ratio
+            self.takes, self.makes, self.speed, allocation, limit
         )
 
     def usage_for(self, allocation: Ivec, limit: Ivec) -> float:
@@ -683,11 +676,12 @@ class BuildingCount:
             return izeros()
         return self.building.limit_waste(allocation.sdiv(self.count)).smul(self.count)
 
-    def back_pressure(self, allocation: Ivec, item: Item, ratio: float) -> Ivec:
+    def back_pressure(self, allocation: Ivec, limit: Ivec) -> Ivec:
         if self.count == 0:
             return izeros()
         return self.building.back_pressure(
-            allocation.sdiv(self.count), item, ratio
+            allocation.sdiv(self.count),
+            limit.sdiv(self.count),
         ).smul(self.count)
 
     def takes_ips(self, take: Ivec | None = None, make: Ivec | None = None) -> Ivec:
@@ -1563,34 +1557,42 @@ def qp(blocks: list[Block]) -> tuple[list[str], Solution] | None:
 
 
 def consumption_from_allocated(allocated: list[Allocated]) -> Ivec:
-    return isum(alloc.total() for alloc in allocated)
+    return isum(alloc.take_total() for alloc in allocated)
 
 
 def production_from_allocated(allocated: list[Allocated]) -> Ivec:
-    return isum(alloc.building.produces_ips(alloc.total()) for alloc in allocated)
+    return isum(alloc.make_total() for alloc in allocated)
 
 
 def flood_forward(allocated: list[Allocated]) -> list[Allocated]:
     for _ in range(20):
         prev_allocated = allocated
+        allocated = [
+            alloc.__replace__(
+                make_local=izeros(),
+                make_remote=alloc.building.produces_ips(alloc.take_total()),
+            )
+            for alloc in allocated
+        ]
         consumption = consumption_from_allocated(allocated)
         production = production_from_allocated(allocated)
+        # surplus = production.sub(consumption)
         for item in Item:
             surplus = production[item] - consumption[item]
             if surplus <= 0.0:
                 continue
             demands = [
-                alloc.building.wants_ips(item) - alloc.total()[item]
+                alloc.building.wants_ips(item) - alloc.take_total()[item]
                 for alloc in allocated
             ]
-            demand = sum(demands)
-            if demand <= 0.0:
+            total_demand = sum(demands)
+            if total_demand <= 0.0:
                 continue
-            can = min(surplus / demand, 1.0)
+            ratio = min(surplus / total_demand, 1.0)
             allocated = [
                 alloc.__replace__(
-                    remote=alloc.total().add(ifrom({item: demand * can})),
-                    local=izeros(),
+                    take_local=izeros(),
+                    take_remote=alloc.take_total().add(ifrom({item: demand * ratio})),
                 )
                 for alloc, demand in sip(allocated, demands)
             ]
@@ -1608,93 +1610,120 @@ def prefer_local(allocated: list[Allocated]) -> list[Allocated]:
             i for i, alloc in enumerate(allocated) if id(alloc.block) == block_id
         ]
         block_allocated = [allocated[i] for i in block_allocated_ids]
+        # TODO hm but we still sum up local and remote here
         block_consumption = consumption_from_allocated(block_allocated)
         block_production = production_from_allocated(block_allocated)
         for item in Item:
             if block_consumption[item] <= 0.0:
                 continue
-            ratio = block_production[item] / block_consumption[item]
-            ratio = min(ratio, 1.0)
+            ratio_take = block_production[item] / block_consumption[item]
+            ratio_take = min(ratio_take, 1.0)
+            ratio_make = block_consumption[item] / block_production[item]
+            ratio_make = min(ratio_make, 1.0)
             for i in block_allocated_ids:
-                remote = allocated[i].remote
-                local = allocated[i].local
-                total = allocated[i].total()
+                total_take = allocated[i].take_total()
+                total_make = allocated[i].make_total()
                 allocated[i] = allocated[i].__replace__(
-                    remote=remote.updated({item: (1.0 - ratio) * total[item]}),
-                    local=local.updated({item: ratio * total[item]}),
+                    take_remote=allocated[i].take_remote.updated(
+                        {item: (1.0 - ratio_take) * total_take[item]}
+                    ),
+                    take_local=allocated[i].take_local.updated(
+                        {item: ratio_take * total_take[item]}
+                    ),
+                    make_remote=allocated[i].make_remote.updated(
+                        {item: (1.0 - ratio_make) * total_make[item]}
+                    ),
+                    make_local=allocated[i].make_local.updated(
+                        {item: ratio_make * total_make[item]}
+                    ),
                 )
     return allocated
 
 
-def back_reallocated(
-    alloc: Allocated, limit: Ivec, out_limit: None | Ivec
-) -> Allocated:
-    # TODO as soon as I do this, trivial cases dont work anymore
-    # ok I think backpressure has to respect assignment correctly
-    # but in a way, this here shouldnt have broken trivial cases?
-    local = ifrom({i: min(alloc.local[i], limit[i]) for i in Item})
+def back_reallocated(alloc: Allocated, limit: Ivec) -> Allocated:
+    local = ifrom({i: min(alloc.take_local[i], limit[i]) for i in Item})
     remote = limit.sub(local)
-    total = isum([local, remote])
     return alloc.__replace__(
-        local=local,
-        remote=remote,
-        usage=None if out_limit is None else alloc.building.usage_for(total, out_limit),
+        take_local=local,
+        take_remote=remote,
+        # TODO see when we are going to set this now
+        # usage=None if out_limit is None else alloc.building.usage_for(total, out_limit),
     )
 
 
 def back_pressure(allocated: list[Allocated]) -> list[Allocated]:
+    block_ids = {id(alloc.block) for alloc in allocated}
+
     for _ in range(20):
         prev_allocated = allocated
+        allocated = list(allocated)
+
+        # TODO should it be a setting what we want to have unlimited?
+        # TODO because we dont treat None vs 0.0 very well, I have this hack for now
+        # TODO also, in a way, would this change per iteration?
+        leaf_items = set(Item) - {
+            item for alloc in allocated for item in alloc.take_total().nonzero_items()
+        }
+
+        for block_id in block_ids:
+            block_allocated_ids = [
+                i for i, alloc in enumerate(allocated) if id(alloc.block) == block_id
+            ]
+            block_allocated = [allocated[i] for i in block_allocated_ids]
+            block_consumption = isum(alloc.take_local for alloc in block_allocated)
+            block_production = isum(alloc.make_local for alloc in block_allocated)
+            block_keep_ratios = ifrom(
+                {
+                    item: min(block_consumption[item] / block_production[item], 1.0)
+                    for item in Item
+                    if block_production[item] > 0.0
+                }
+            )
+            block_keep_ratios = block_keep_ratios.updated(
+                {item: 1.0 for item in leaf_items}
+            )
+            for i in block_allocated_ids:
+                allocated[i] = allocated[i].__replace__(
+                    make_local=allocated[i].make_local.mul(block_keep_ratios)
+                )
+
+        consumption = isum(alloc.take_remote for alloc in allocated)
+        production = isum(alloc.make_remote for alloc in allocated)
+        keep_ratios = ifrom(
+            {
+                item: min(consumption[item] / production[item], 1.0)
+                for item in Item
+                if production[item] > 0.0
+            }
+        )
+        keep_ratios = keep_ratios.updated({item: 1.0 for item in leaf_items})
         allocated = [
-            # TODO limit_waste might have to happen only once? not sure with nonlinear craftings
-            # should we combine this into backpressure?
-            back_reallocated(alloc, alloc.building.limit_waste(alloc.total()), None)
+            alloc.__replace__(make_remote=alloc.make_remote.mul(keep_ratios))
             for alloc in allocated
         ]
-        consumption = consumption_from_allocated(allocated)
-        production = production_from_allocated(allocated)
-        for item in Item:
-            # TODO should it be a setting what we want to have unlimited?
-            # TODO because we dont treat None vs 0.0 very well, I have this hack for now
-            if consumption[item] == 0.0:
-                continue
-            # TODO hm im not sure if it is necessary to route backpressure thru local and global?
-            # it might converge faster? but sofar the solutions seem right
-            surplus = production[item] - consumption[item]
-            if surplus <= 0.0:
-                continue
-            ratio = consumption[item] / production[item]
-            allocated = [
-                back_reallocated(
-                    # TODO hm make this more absolute? still need to distribute fairly
-                    # computing usage is difficult if we dont have a final limit when with back-pressure
-                    # also can we infer if a building is limit by backpressure or by input
-                    # because in equilibrium state, they should be the same
-                    # hmm not sure that is the problem currenly, fishery has just one output
-                    # why does it end up with a 1.0 usage?
-                    # hm is it because we only use have_allocations_converged and fisheries' allocations are invariant?
-                    alloc,
-                    alloc.building.back_pressure(alloc.total(), item, ratio),
-                    # TODO this is still messed up, need an easier model
-                    # in the end, usage cannot just be from global consumption, local comes first and is maybe the limit
-                    # ifrom(
-                    #     {item: alloc.building.produces_ips(alloc.total())[item] * ratio}
-                    # ),
-                    None,
-                )
-                for alloc in allocated
-            ]
+
+        allocated = [
+            back_reallocated(
+                alloc,
+                alloc.building.back_pressure(alloc.take_total(), alloc.make_total()),
+            )
+            for alloc in allocated
+        ]
+
         if have_allocations_converged(prev_allocated, allocated):
             return allocated
-    print("pressure didnt converge")
+
+    print("`back_pressure` didnt converge")
     return allocated
 
 
 # TODO assumes those two are parallel and zip
 def have_allocations_converged(a: list[Allocated], b: list[Allocated]) -> bool:
     return all(
-        i.local.almost_equal(j.local, 0.01 / 60)
-        and i.remote.almost_equal(j.remote, 0.01 / 60)
+        i.take_local.almost_equal(j.take_local, 0.01 / 60)
+        and i.take_remote.almost_equal(j.take_remote, 0.01 / 60)
+        and i.make_local.almost_equal(j.make_local, 0.01 / 60)
+        and i.make_remote.almost_equal(j.make_remote, 0.01 / 60)
         for i, j in zip(a, b, strict=True)
     )
 
@@ -1703,12 +1732,16 @@ def have_allocations_converged(a: list[Allocated], b: list[Allocated]) -> bool:
 class Allocated:
     block: Block
     building: BuildingCount
-    local: Ivec
-    remote: Ivec
-    usage: None | float
+    take_local: Ivec
+    take_remote: Ivec
+    make_local: Ivec
+    make_remote: Ivec
 
-    def total(self) -> Ivec:
-        return isum([self.local, self.remote])
+    def take_total(self) -> Ivec:
+        return isum([self.take_local, self.take_remote])
+
+    def make_total(self) -> Ivec:
+        return isum([self.make_local, self.make_remote])
 
 
 def fixpoint(
@@ -1720,9 +1753,10 @@ def fixpoint(
         Allocated(
             block=block,
             building=building,
-            local=izeros(),
-            remote=izeros(),
-            usage=None,
+            take_local=izeros(),
+            take_remote=izeros(),
+            make_local=izeros(),
+            make_remote=izeros(),
         )
         for block in blocks
         for building in block.buildings
@@ -1733,7 +1767,8 @@ def fixpoint(
         tuple[BuildingCount, float | None, tuple[Ivec, Ivec]]
     ]:
         return [
-            (alloc.building, alloc.usage, (alloc.local, alloc.remote))
+            # TODO usage
+            (alloc.building, None, (alloc.take_local, alloc.take_remote))
             for alloc in allocated
         ]
 
@@ -1745,6 +1780,7 @@ def fixpoint(
         yield False, flatten_allocations()
         prev_allocated = allocated
         allocated = flood_forward(allocated)
+        # TODO we could maybe build that into flood_forward eventually?
         allocated = prefer_local(allocated)
         allocated = back_pressure(allocated)
         if have_allocations_converged(prev_allocated, allocated):
