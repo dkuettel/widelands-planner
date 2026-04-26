@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import math
 import re
-from collections import defaultdict
+from collections import defaultdict, deque
 from collections.abc import Iterable, Iterator, Mapping, Sequence, Set
 from dataclasses import dataclass
 from enum import StrEnum
@@ -1792,7 +1792,7 @@ class Allocated:
         return isum([self.make_local, self.make_remote])
 
 
-def fixpoint(blocks: list[Block]) -> Iterator[tuple[bool, list[Allocated]]]:
+def fixpoints(blocks: list[Block]) -> Iterator[tuple[bool, list[Allocated]]]:
     allocated = [
         Allocated(
             block=block,
@@ -1824,3 +1824,12 @@ def fixpoint(blocks: list[Block]) -> Iterator[tuple[bool, list[Allocated]]]:
             return
 
     yield False, allocated
+
+
+def last[T](it: Iterable[T]) -> T:
+    [last] = deque(it, maxlen=1)
+    return last
+
+
+def fixpoint(blocks: list[Block]) -> tuple[bool, list[Allocated]]:
+    return last(fixpoints(blocks))

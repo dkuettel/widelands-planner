@@ -272,11 +272,6 @@ def setup4() -> list[Block]:
     return blocks
 
 
-def last[T](it: Iterable[T]) -> T:
-    [last] = deque(it, maxlen=1)
-    return last
-
-
 def str_from_ivec(vec: Ivec) -> str:
     data = [f"{i.name}: {v:.1f}" for i, v in vec.data.items() if v != 0.0]
     return "{" + ", ".join(data) + "}"
@@ -292,7 +287,7 @@ def test():
     # blocks = setup3()
     blocks = setup4()
 
-    converged, allocated = last(fixpoint(blocks))
+    converged, allocated = fixpoint(blocks)
 
     if not converged:
         print("did not converge")
