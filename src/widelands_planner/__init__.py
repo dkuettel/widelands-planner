@@ -277,7 +277,7 @@ def last[T](it: Iterable[T]) -> T:
 
 
 def str_from_ivec(vec: Ivec) -> str:
-    data = [f"{i.name}: {v:.2f}" for i, v in vec.data.items() if v != 0.0]
+    data = [f"{i.name}: {v:.1f}" for i, v in vec.data.items() if v != 0.0]
     return "{" + ", ".join(data) + "}"
 
 
@@ -306,12 +306,12 @@ def test():
                 count.count,
                 str_from_usage(usage),
                 count.building.building.name,
-                str_from_ivec(local),
-                str_from_ivec(remote),
+                str_from_ivec(local.smul(60)),
+                str_from_ivec(remote.smul(60)),
             )
             for count, usage, (local, remote) in solution
             if id(count) in ids
         ]
         print()
         print(f"block {i}:")
-        print(tabulate(data))
+        print(tabulate(data, headers=["#", "%", "name", "local i/m", "remote i/m"]))
