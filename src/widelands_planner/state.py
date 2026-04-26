@@ -132,6 +132,10 @@ class Vec[I]:
         items = {i for r in rates for i in r.data}
         return cls(ty, {i: sum(r[i] for r in rates) for i in items})
 
+    def low_clamped(self, low: float) -> Vec[I]:
+        # TODO well again, what do do with unset values, if they are 0.0, they should also be changed
+        return Vec(self.ty, {i: max(low, v) for (i, v) in self.data.items()})
+
     def updated(self, updates: Mapping[I, float]) -> Vec[I]:
         v = Vec(self.ty, dict(self.data))
         v.data.update(updates)
@@ -433,6 +437,8 @@ class BaseBuilding:
                 limit_constraints, key=lambda x: x[1], default=(None, 1.0)
             )
             ratio = min(allocation_ratio, limit_ratio)
+            used_allocation_ratio = ratio == allocation_ratio
+            used_limit_ratio = ratio == limit_ratio
             assert 0 <= ratio, (
                 allocation_item,
                 allocation_ratio,
@@ -442,11 +448,13 @@ class BaseBuilding:
             old_used, used = used, min(used + ratio, 1.0)
             ratio = used - old_used
             allocation = allocation.sub(take_ips.smul(ratio))
-            if allocation_item is not None and ratio == allocation_ratio:
+            allocation = allocation.low_clamped(0.0)
+            if allocation_item is not None and used_allocation_ratio:
                 allocation.data[allocation_item] = 0.0
             assert all(v >= 0.0 for v in allocation.data.values()), allocation
             limit = limit.sub(make_ips.smul(ratio))
-            if limit_item is not None and ratio == limit_ratio:
+            limit = limit.low_clamped(0.0)
+            if limit_item is not None and used_limit_ratio:
                 limit.data[limit_item] = 0.0
             assert all(v >= 0.0 for v in limit.data.values()), limit
             total_take_ips = total_take_ips.add(take_ips.smul(ratio))
@@ -1567,6 +1575,7 @@ def production_from_allocated(allocated: list[Allocated]) -> Ivec:
 def flood_forward(allocated: list[Allocated]) -> list[Allocated]:
     for _ in range(20):
         prev_allocated = allocated
+
         allocated = [
             alloc.__replace__(
                 make_local=izeros(),
@@ -1574,8 +1583,15 @@ def flood_forward(allocated: list[Allocated]) -> list[Allocated]:
             )
             for alloc in allocated
         ]
+
+        for alloc in allocated:
+            assert all(v >= 0.0 for v in alloc.make_total().data.values()), (
+                alloc.make_total()
+            )
+
         consumption = consumption_from_allocated(allocated)
         production = production_from_allocated(allocated)
+
         # surplus = production.sub(consumption)
         for item in Item:
             surplus = production[item] - consumption[item]
@@ -1596,9 +1612,26 @@ def flood_forward(allocated: list[Allocated]) -> list[Allocated]:
                 )
                 for alloc, demand in sip(allocated, demands)
             ]
+
+        for alloc in allocated:
+            assert all(v >= 0.0 for v in alloc.make_total().data.values()), (
+                alloc.make_total()
+            )
+
+        # TODO this could be computed in one go above
+        allocated = [
+            alloc.__replace__(
+                flood_usage=alloc.building.usage_for(
+                    alloc.take_total(), alloc.make_total()
+                )
+            )
+            for alloc in allocated
+        ]
+
         if have_allocations_converged(prev_allocated, allocated):
             return allocated
-    print("boosting didnt converge")
+
+    print("flodding didnt converge")
     return allocated
 
 
@@ -1713,6 +1746,16 @@ def back_pressure(allocated: list[Allocated]) -> list[Allocated]:
             for alloc in allocated
         ]
 
+        # TODO this could be computed in one go above
+        allocated = [
+            alloc.__replace__(
+                stable_usage=alloc.building.usage_for(
+                    alloc.take_total(), alloc.make_total()
+                )
+            )
+            for alloc in allocated
+        ]
+
         if have_allocations_converged(prev_allocated, allocated):
             return allocated
 
@@ -1739,6 +1782,8 @@ class Allocated:
     take_remote: Ivec
     make_local: Ivec
     make_remote: Ivec
+    flood_usage: float
+    stable_usage: float
 
     def take_total(self) -> Ivec:
         return isum([self.take_local, self.take_remote])
@@ -1756,6 +1801,8 @@ def fixpoint(blocks: list[Block]) -> Iterator[tuple[bool, list[Allocated]]]:
             take_remote=izeros(),
             make_local=izeros(),
             make_remote=izeros(),
+            flood_usage=0.0,
+            stable_usage=0.0,
         )
         for block in blocks
         for building in block.buildings

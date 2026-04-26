@@ -6,6 +6,7 @@ from collections.abc import Iterable
 from tabulate import tabulate
 
 from widelands_planner.state import (
+    Allocated,
     Block,
     Bname,
     BuildingCount,
@@ -281,12 +282,8 @@ def str_from_ivec(vec: Ivec) -> str:
     return "{" + ", ".join(data) + "}"
 
 
-def str_from_usage(usage: float | None) -> str:
-    match usage:
-        case float() | int():
-            return f"{round(usage * 100)}%"
-        case None:
-            return "None"
+def str_from_usage(alloc: Allocated) -> str:
+    return f"{round(alloc.stable_usage * 100)}% + {round((alloc.flood_usage - alloc.stable_usage) * 100)}%"
 
 
 def test():
@@ -305,13 +302,7 @@ def test():
         data = [
             (
                 alloc.building.count,
-                # TODO we could look at what this will do if we didnt have backpressure for one step
-                # if it goes up, we can say 30%+5%, meaning we can still get 5% more, we are limited by back-pressure
-                # and then we are limited by input
-                # so this would come out of the backpressure step? we have a usage field, and another extra-usage field?
-                str_from_usage(
-                    alloc.building.usage_for(alloc.take_total(), alloc.make_total())
-                ),
+                str_from_usage(alloc),
                 alloc.building.building.building.name,
                 (
                     str_from_ivec(alloc.take_local.smul(60))
