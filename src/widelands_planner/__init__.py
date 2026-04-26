@@ -305,6 +305,10 @@ def test():
         data = [
             (
                 alloc.building.count,
+                # TODO we could look at what this will do if we didnt have backpressure for one step
+                # if it goes up, we can say 30%+5%, meaning we can still get 5% more, we are limited by back-pressure
+                # and then we are limited by input
+                # so this would come out of the backpressure step? we have a usage field, and another extra-usage field?
                 str_from_usage(
                     alloc.building.usage_for(alloc.take_total(), alloc.make_total())
                 ),
