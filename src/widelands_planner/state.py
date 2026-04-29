@@ -228,6 +228,10 @@ class Vec[I]:
     def is_nonnegative(self) -> bool:
         return all(v >= 0.0 for v in self.data.values())
 
+    def rounded(self, eps: float) -> Vec[I]:
+        # TODO ignoring missing entries
+        return Vec(self.ty, {i: (round(v / eps) * eps) for (i, v) in self.data.items()})
+
 
 type Ivec = Vec[Item]
 
@@ -1882,18 +1886,24 @@ def back_pressure(allocated: list[Allocated]) -> list[Allocated]:
     return allocated
 
 
+ips_eps: Final = 0.01 / 60
+
+
 # TODO assumes those two are parallel and zip
 def have_allocations_converged(a: list[Allocated], b: list[Allocated]) -> bool:
-    eps: Final = 0.01 / 60
     return all(
-        i.take_local.almost_equal(j.take_local, eps)
-        and i.take_remote.almost_equal(j.take_remote, eps)
-        and i.make_main_local.almost_equal(j.make_main_local, eps)
-        and i.make_aux_local.almost_equal(j.make_aux_local, eps)
-        and i.make_main_remote.almost_equal(j.make_main_remote, eps)
-        and i.make_aux_remote.almost_equal(j.make_aux_remote, eps)
+        i.take_local.almost_equal(j.take_local, ips_eps)
+        and i.take_remote.almost_equal(j.take_remote, ips_eps)
+        and i.make_main_local.almost_equal(j.make_main_local, ips_eps)
+        and i.make_aux_local.almost_equal(j.make_aux_local, ips_eps)
+        and i.make_main_remote.almost_equal(j.make_main_remote, ips_eps)
+        and i.make_aux_remote.almost_equal(j.make_aux_remote, ips_eps)
         for i, j in zips(a, b, strict=True)
     )
+
+
+def rounded_allocations(allocations: Sequence[Allocated]) -> list[Allocated]:
+    return [alloc.rounded(ips_eps) for alloc in allocations]
 
 
 @dataclass(frozen=True)
@@ -1941,6 +1951,16 @@ class Allocated:
         total = self.make_full_total()
         return total.is_nonnegative()
 
+    def rounded(self, eps: float) -> Allocated:
+        return self.__replace__(
+            take_local=self.take_local.rounded(eps),
+            take_remote=self.take_remote.rounded(eps),
+            make_main_local=self.make_main_local.rounded(eps),
+            make_aux_local=self.make_aux_local.rounded(eps),
+            make_main_remote=self.make_main_remote.rounded(eps),
+            make_aux_remote=self.make_aux_remote.rounded(eps),
+        )
+
 
 def fixpoints(blocks: list[Block]) -> Iterator[tuple[bool, list[Allocated]]]:
     allocated = [
@@ -1972,7 +1992,7 @@ def fixpoints(blocks: list[Block]) -> Iterator[tuple[bool, list[Allocated]]]:
         allocated = prefer_local(allocated)
         allocated = back_pressure(allocated)
         if have_allocations_converged(prev_allocated, allocated):
-            yield True, allocated
+            yield True, rounded_allocations(allocated)
             return
 
     yield False, allocated
