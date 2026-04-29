@@ -363,10 +363,9 @@ def test():
     # blocks = setup4()
     blocks = setup5()
 
-    converged, allocated = fixpoint(blocks)
+    status, allocated = fixpoint(blocks)
 
-    if not converged:
-        print("did not converge")
+    print(status)
 
     for i, block in enumerate(blocks):
         ids = {id(building) for building in block.buildings}

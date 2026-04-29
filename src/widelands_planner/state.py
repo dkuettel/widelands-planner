@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import math
 import re
+import time
 from collections import defaultdict, deque
 from collections.abc import Iterable, Iterator, Mapping, Sequence, Set
 from dataclasses import dataclass
@@ -2004,6 +2005,17 @@ def last[T](it: Iterable[T]) -> T:
     return last
 
 
-def fixpoint(blocks: list[Block]) -> tuple[bool, list[Allocated]]:
-    # TODO would like to count iterations, go forever but have a component that limits, and says converged, and measures time
-    return last(fixpoints(blocks))
+def fixpoint(blocks: list[Block]) -> tuple[str, list[Allocated]]:
+    t = time.perf_counter_ns()
+    # TODO maybe better make fixpoints go on forever, and yield even sub iterations, and we decide here if we stop earlier (time, or it count)
+    it = fixpoints(blocks)
+    converged, allocated = next(it)
+    count = 1
+    for converged, allocated in it:
+        count += 1
+    dt = round((time.perf_counter_ns() - t) / 1_000_000)
+    if converged:
+        status = f"{count} iterations converged in {dt}ms"
+    else:
+        status = f"{count} iterations did not converge in {dt}ms"
+    return status, allocated
