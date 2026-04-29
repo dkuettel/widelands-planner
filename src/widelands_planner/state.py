@@ -8,7 +8,7 @@ from dataclasses import dataclass
 from enum import StrEnum
 from functools import cache, partial
 from pathlib import Path
-from typing import final, override
+from typing import Final, final, override
 
 import numpy as np
 import torch
@@ -19,7 +19,16 @@ from qpsolvers import (
 from qpsolvers.problem import Problem
 from torch import Tensor, nn
 
-sip = partial(zip, strict=True)
+zips = partial(zip, strict=True)
+
+
+def clipped(low: float | None, value: float, high: float | None) -> float:
+    assert low is None or high is None or low <= high, (low, high)
+    if low is not None:
+        value = max(low, value)
+    if high is not None:
+        value = min(value, high)
+    return value
 
 
 class Item(StrEnum):
@@ -132,7 +141,7 @@ class Vec[I]:
         items = {i for r in rates for i in r.data}
         return cls(ty, {i: sum(r[i] for r in rates) for i in items})
 
-    def low_clamped(self, low: float) -> Vec[I]:
+    def low_clipped(self, low: float) -> Vec[I]:
         # TODO well again, what do do with unset values, if they are 0.0, they should also be changed
         return Vec(self.ty, {i: max(low, v) for (i, v) in self.data.items()})
 
@@ -216,6 +225,9 @@ class Vec[I]:
         # TODO very ambigous, and default too
         return min(self.data.values(), default=0)
 
+    def is_nonnegative(self) -> bool:
+        return all(v >= 0.0 for v in self.data.values())
+
 
 type Ivec = Vec[Item]
 
@@ -245,21 +257,22 @@ class TakeMake:
 @dataclass(frozen=True)
 class Crafting:
     take: Ivec
-    make: Ivec
-    seconds: tuple[float, float]  # (short, long)
-    # TODO this also doesnt quite model if one entry is a bit lower than needed
-    # then we will flip flop between the two modes
-    # TODO probably not needed anymore? hopefully no weird one there that we cant optimize by input maximization
-    unless: None | set[Item] = None  # skip this crafting when these items are available
+    # experiences back-pressure (meaning "produce only when economy needs")
+    make_main: Ivec
+    # doesnt experience back-pressure
+    make_aux: Ivec
+    seconds_range: tuple[float, float]  # (short, long)
 
     def __post_init__(self):
-        assert self.seconds[0] <= self.seconds[1]
+        assert self.seconds_range[0] <= self.seconds_range[1]
 
 
 @dataclass(frozen=True)
 class BaseBuilding:
     name: Bname
-    craftings: list[Crafting]
+    # the next level only gets applied after the first one is maximized
+    # (eg, the tavern makes 2-input rations before falling back to 1-input rations)
+    crafting_levels: list[list[Crafting]]
     pause: float
 
     @classmethod
@@ -273,21 +286,37 @@ class BaseBuilding:
         return cls(
             name,
             [
-                Crafting(
-                    take=ifrom(take),
-                    make=ifrom(make),
-                    seconds=(short, long),
-                )
+                [
+                    Crafting(
+                        take=ifrom(take),
+                        make_main=ifrom(make),
+                        make_aux=izeros(),
+                        seconds_range=(short, long),
+                    )
+                ]
             ],
             0,
         )
 
     def get_take_items(self) -> set[Item]:
-        return {i for c in self.craftings for i in c.take.nonzero_items()}
+        return {
+            item
+            for level in self.crafting_levels
+            for crafting in level
+            for item in crafting.take.nonzero_items()
+        }
 
+    # TODO is this needed, should it include aux and main?
     def get_make_items(self) -> set[Item]:
-        return {i for c in self.craftings for i in c.make.nonzero_items()}
+        return {
+            item
+            for level in self.crafting_levels
+            for crafting in level
+            for make in [crafting.make_main, crafting.make_aux]
+            for item in make.nonzero_items()
+        }
 
+    # TODO this is obsolete anyway, removed soon, doesnt respect levels now
     def get_ips(
         self,
         take: Ivec | None,
@@ -300,16 +329,17 @@ class BaseBuilding:
         tk = izeros()  # cycle take items
         mk = izeros()  # cycle make items
 
-        for c in self.craftings:
-            if (
-                takes >= c.take.nonzero_items()
-                and (c.unless is None or not (takes & c.unless))
-                and (c.make.is_zero() or makes & c.make.nonzero_items())
-            ):
-                short, long = c.seconds
-                dt += speed * short + (1 - speed) * long
-                tk = tk.add(c.take)
-                mk = mk.add(c.make)
+        for level in self.crafting_levels:
+            for c in level:
+                if (
+                    takes >= c.take.nonzero_items()
+                    # and (c.unless is None or not (takes & c.unless))
+                    and (c.make_main.is_zero() or makes & c.make_main.nonzero_items())
+                ):
+                    short, long = c.seconds_range
+                    dt += speed * short + (1 - speed) * long
+                    tk = tk.add(c.take)
+                    mk = mk.add(c.make_main).add(c.make_aux)
 
         dt += self.pause
 
@@ -346,37 +376,42 @@ class BaseBuilding:
     ) -> Ivec:
         return self.get_ips(None, None, takes, makes, speed).take.smul(usage)
 
-    def get_enabled_craftings(
+    def get_enabled_crafting_levels(
         self, takes: set[Item], makes: set[Item]
-    ) -> list[Crafting]:
+    ) -> list[list[Crafting]]:
         return [
-            c
-            for c in self.craftings
-            if (
-                takes >= c.take.nonzero_items()
-                # TODO we will probably remove the unless thing soon and use preferred levels
-                # and (c.unless is None or not (takes & c.unless))
-                # TODO we probably should only define takes anyway
-                # and (c.make.is_zero() or makes & c.make.nonzero_items())
-            )
+            [
+                crafting
+                for crafting in level
+                if (
+                    takes >= crafting.take.nonzero_items()
+                    # TODO we will probably remove the unless thing soon and use preferred levels
+                    # and (c.unless is None or not (takes & c.unless))
+                    # TODO we probably should only define takes anyway
+                    # and (c.make.is_zero() or makes & c.make.nonzero_items())
+                )
+            ]
+            for level in self.crafting_levels
         ]
 
     def take_make_ips_from_craftings(
         self, craftings: Sequence[Crafting], speed: float
-    ) -> tuple[Ivec, Ivec]:
+    ) -> tuple[Ivec, Ivec, Ivec]:
         if len(craftings) == 0:
-            return izeros(), izeros()
+            return izeros(), izeros(), izeros()
         dt: float = 0.0
         take: Ivec = izeros()
-        make: Ivec = izeros()
+        make_main: Ivec = izeros()
+        make_aux: Ivec = izeros()
         for crafting in craftings:
-            short, long = crafting.seconds
+            short, long = crafting.seconds_range
             dt += speed * short + (1 - speed) * long
             take = take.add(crafting.take)
-            make = make.add(crafting.make)
+            make_main = make_main.add(crafting.make_main)
+            make_aux = make_aux.add(crafting.make_aux)
         dt += self.pause
         assert dt > 0
-        return take.sdiv(dt), make.sdiv(dt)
+        return take.sdiv(dt), make_main.sdiv(dt), make_aux.sdiv(dt)
 
     def produces_ips(
         self,
@@ -384,9 +419,11 @@ class BaseBuilding:
         makes: set[Item],
         speed: float,
         allocation: Ivec,
-    ) -> Ivec:
-        _take, make, _used = self.allocate_ips(takes, makes, speed, allocation)
-        return make
+    ) -> tuple[Ivec, Ivec]:
+        _take, make_main, make_aux, _used = self.allocate_ips(
+            takes, makes, speed, allocation
+        )
+        return make_main, make_aux
 
     def allocate_ips(
         self,
@@ -395,7 +432,8 @@ class BaseBuilding:
         speed: float,
         allocation: Ivec,
         limit: Ivec | None = None,
-    ) -> tuple[Ivec, Ivec, float]:
+    ) -> tuple[Ivec, Ivec, Ivec, float]:
+        # NOTE the limit only affects output that experiences back-pressure, therefore, the final allocated output could be more than the limit
         # NOTE limit is interpreted as limit only when value set unset values are "inf"
         if limit is None:
             limit = ifrom({i: math.inf for i in Item})
@@ -406,20 +444,30 @@ class BaseBuilding:
         assert all(v >= 0.0 for v in limit.data.values()), limit
         # TODO make preferences, two level, fill first level first, like in the bakery
         # TODO actually we can only control the takes, not the makes, right?
-        craftings: list[Crafting] = self.get_enabled_craftings(takes, makes)
-        craftings = [
-            c
-            for c in craftings
-            if c.take.nonzero_items() <= allocation.nonzero_items()
-            and not (
-                c.make.nonzero_items() & {i for i, v in limit.data.items() if v == 0.0}
-            )
+        crafting_levels: list[list[Crafting]] = self.get_enabled_crafting_levels(
+            takes, makes
+        )
+        crafting_levels = [
+            [
+                crafting
+                for crafting in level
+                if crafting.take.nonzero_items() <= allocation.nonzero_items()
+                and not (
+                    crafting.make_main.nonzero_items()
+                    & {i for i, v in limit.data.items() if v == 0.0}
+                )
+            ]
+            for level in crafting_levels
         ]
+        crafting_levels = [level for level in crafting_levels if len(level) > 0]
         total_take_ips = izeros()
-        total_make_ips = izeros()
+        total_make_main_ips = izeros()
+        total_make_aux_ips = izeros()
         used = 0.0
-        while used < 1.0 and len(craftings) > 0:
-            take_ips, make_ips = self.take_make_ips_from_craftings(craftings, speed)
+        while used < 1.0 and len(crafting_levels) > 0:
+            take_ips, make_main_ips, make_aux_ips = self.take_make_ips_from_craftings(
+                crafting_levels[0], speed
+            )
             allocation_constraints = (
                 (item, allocation[item] / ips)
                 for item, ips in take_ips.data.items()
@@ -430,7 +478,7 @@ class BaseBuilding:
             )
             limit_constraints = (
                 (item, limit[item] / ips)
-                for item, ips in make_ips.data.items()
+                for item, ips in make_main_ips.data.items()
                 if ips > 0.0 and item in limit.data
             )
             limit_item, limit_ratio = min(
@@ -448,43 +496,52 @@ class BaseBuilding:
             old_used, used = used, min(used + ratio, 1.0)
             ratio = used - old_used
             allocation = allocation.sub(take_ips.smul(ratio))
-            allocation = allocation.low_clamped(0.0)
+            allocation = allocation.low_clipped(0.0)
             if allocation_item is not None and used_allocation_ratio:
                 allocation.data[allocation_item] = 0.0
             assert all(v >= 0.0 for v in allocation.data.values()), allocation
-            limit = limit.sub(make_ips.smul(ratio))
-            limit = limit.low_clamped(0.0)
+            limit = limit.sub(make_main_ips.smul(ratio)).sub(make_aux_ips.smul(ratio))
+            limit = limit.low_clipped(0.0)
             if limit_item is not None and used_limit_ratio:
                 limit.data[limit_item] = 0.0
             assert all(v >= 0.0 for v in limit.data.values()), limit
             total_take_ips = total_take_ips.add(take_ips.smul(ratio))
-            total_make_ips = total_make_ips.add(make_ips.smul(ratio))
-            craftings = [
-                c
-                for c in craftings
-                if c.take.nonzero_items() <= allocation.nonzero_items()
-                and not (
-                    c.make.nonzero_items()
-                    & {i for i, v in limit.data.items() if v == 0.0}
-                )
+            total_make_main_ips = total_make_main_ips.add(make_main_ips.smul(ratio))
+            total_make_aux_ips = total_make_aux_ips.add(make_aux_ips.smul(ratio))
+            crafting_levels = [
+                [
+                    crafting
+                    for crafting in level
+                    if crafting.take.nonzero_items() <= allocation.nonzero_items()
+                    and not (
+                        crafting.make_main.nonzero_items()
+                        & {i for i, v in limit.data.items() if v == 0.0}
+                    )
+                ]
+                for level in crafting_levels
             ]
+            crafting_levels = [level for level in crafting_levels if len(level) > 0]
         assert 0 <= used <= 1.0, used
-        return total_take_ips, total_make_ips, used
+        return total_take_ips, total_make_main_ips, total_make_aux_ips, used
 
     def wants_ips(
         self, takes: set[Item], makes: set[Item], speed: float, item: Item
     ) -> float:
         # TODO should it be based on current allocation?
-        craftings: list[Crafting] = self.get_enabled_craftings(takes, makes)
+        levels: list[list[Crafting]] = self.get_enabled_crafting_levels(takes, makes)
         candidates = (
-            self.take_make_ips_from_craftings([c], speed)[0][item] for c in craftings
+            self.take_make_ips_from_craftings([c], speed)[0][item]
+            for level in levels
+            for c in level
         )
         return max(candidates, default=0.0)
 
     def limit_waste(
         self, takes: set[Item], makes: set[Item], speed: float, allocation: Ivec
     ) -> Ivec:
-        take, _make, _used = self.allocate_ips(takes, makes, speed, allocation)
+        take, _make_main, _make_aux, _used = self.allocate_ips(
+            takes, makes, speed, allocation
+        )
         return take
 
     def back_pressure(
@@ -495,7 +552,9 @@ class BaseBuilding:
         allocation: Ivec,
         limit: Ivec,
     ) -> Ivec:
-        take, _make, _used = self.allocate_ips(takes, makes, speed, allocation, limit)
+        take, _make_main, _make_aux, _used = self.allocate_ips(
+            takes, makes, speed, allocation, limit
+        )
         return take
 
     def usage_for(
@@ -506,7 +565,9 @@ class BaseBuilding:
         makes: set[Item],
         speed: float,
     ) -> float:
-        _take, _make, used = self.allocate_ips(takes, makes, speed, allocation, limit)
+        _take, _make_main, _make_aux, used = self.allocate_ips(
+            takes, makes, speed, allocation, limit
+        )
         return used
 
     def get_constraints(
@@ -521,50 +582,8 @@ class BaseBuilding:
         list[Equality],
         dict[Variable, float],  # minimization
     ]:
-        craftings = [
-            c
-            for c in self.craftings
-            if (
-                takes >= c.take.nonzero_items()
-                # TODO this is not quite correct, it should be based on whats available, not whats set
-                # and then prefer some over others too (two rations instead of single rations)
-                # or we do that with a min/max? that could be more exact, and possible
-                # and (c.unless is None or not (takes & c.unless))
-                and (c.make.is_zero() or makes & c.make.nonzero_items())
-            )
-        ]
-
-        users = [Variable("user", 0.0, 1.0) for _ in craftings]
-        equations = [Equality({usage: 1.0} | {u: -1.0 for u in users}, 0.0)]
-
-        take: dict[Item, dict[Variable, float]] = dict()
-        make: dict[Item, dict[Variable, float]] = dict()
-
-        for user, crafting in zip(users, craftings, strict=True):
-            short, long = crafting.seconds
-            seconds = speed * short + (1 - speed) * long + self.pause
-            for i in crafting.take.nonzero_items():
-                # TODO every user should only appear once, right?
-                take.setdefault(i, dict())[user] = crafting.take[i] / seconds
-            for i in crafting.make.nonzero_items():
-                # TODO some makes need to be soft and dont require balance? usually when there is more than one output
-                # is that output just lost? or still built but doesnt back-pressure?
-                # back-pressure only depends on "if economy needs", but im not sure if the rest is still produced and stored?
-                # reindeer has a step to make fur, and one to make fur and meat
-                # both do when fur is needed, but the optimization doesnt balance it out probably?
-                # in this case, make it one step combined so they always happen?
-                # so we connect output only to the balance equation in a hard way if it is part of "economy needs"? or at least semantically? because we do it for woodcutters too
-                # otherwise, how to connect it so that it is used, but okay if overflow if nothing else?
-                make.setdefault(i, dict())[user] = crafting.make[i] / seconds
-
-        mins: dict[Variable, float] = dict()
-        for item, vars in take.items():
-            m = max(vars.values())
-            unused = Variable(f"{item.value}/unused", 0.0, m)
-            equations.append(Equality(vars | {unused: 1.0}, m))
-            mins[unused] = 1.0
-
-        return take, make, equations, mins
+        # TODO remove
+        assert False
 
     def takes_ips(
         self,
@@ -608,7 +627,7 @@ class ConfiguredGenericBuilding:
     def needs_ips(self, usage: float) -> Ivec:
         return self.building.needs_ips(self.takes, self.makes, self.speed, usage)
 
-    def produces_ips(self, allocation: Ivec) -> Ivec:
+    def produces_ips(self, allocation: Ivec) -> tuple[Ivec, Ivec]:
         return self.building.produces_ips(
             self.takes, self.makes, self.speed, allocation
         )
@@ -671,10 +690,11 @@ class BuildingCount:
             allocation.sdiv(self.count), limit.sdiv(self.count)
         )
 
-    def produces_ips(self, allocation: Ivec) -> Ivec:
+    def produces_ips(self, allocation: Ivec) -> tuple[Ivec, Ivec]:
         if self.count == 0:
-            return izeros()
-        return self.building.produces_ips(allocation.sdiv(self.count)).smul(self.count)
+            return izeros(), izeros()
+        main, aux = self.building.produces_ips(allocation.sdiv(self.count))
+        return main.smul(self.count), aux.smul(self.count)
 
     def wants_ips(self, item: Item) -> float:
         return self.building.wants_ips(item) * self.count
@@ -755,6 +775,7 @@ def extract_plain_timings(path: Path) -> tuple[float, float]:
     return float(m_min["value"]), float(m_max["value"])
 
 
+# TODO with cache, we need only this, no dictionary from the other function
 @cache
 def building_from_name(name: Bname) -> Building:
     b = partial(BaseBuilding.from_lua, timings=name.name, name=name)
@@ -807,21 +828,26 @@ def building_from_name(name: Bname) -> Building:
             return BaseBuilding(
                 name,
                 [
-                    Crafting(
-                        ifrom({Item.barley: 1, Item.water: 1, Item.honey: 1}),
-                        ifrom({Item.mead: 1}),
-                        (65.667, 65.667),
-                    ),
-                    Crafting(
-                        ifrom({Item.barley: 1, Item.water: 1}),
-                        ifrom({Item.beer: 1}),
-                        (60.667, 60.667),
-                    ),
-                    Crafting(
-                        ifrom({Item.barley: 1, Item.water: 1, Item.honey: 1}),
-                        ifrom({Item.mead: 1}),
-                        (65.667, 65.667),
-                    ),
+                    [
+                        Crafting(
+                            ifrom({Item.barley: 1, Item.water: 1, Item.honey: 1}),
+                            ifrom({Item.mead: 1}),
+                            izeros(),
+                            (65.667, 65.667),
+                        ),
+                        Crafting(
+                            ifrom({Item.barley: 1, Item.water: 1}),
+                            ifrom({Item.beer: 1}),
+                            izeros(),
+                            (60.667, 60.667),
+                        ),
+                        Crafting(
+                            ifrom({Item.barley: 1, Item.water: 1, Item.honey: 1}),
+                            ifrom({Item.mead: 1}),
+                            izeros(),
+                            (65.667, 65.667),
+                        ),
+                    ]
                 ],
                 10,
             )
@@ -833,21 +859,26 @@ def building_from_name(name: Bname) -> Building:
             return BaseBuilding(
                 name,
                 [
-                    Crafting(
-                        ifrom({Item.barley: 1, Item.water: 1, Item.honey: 1}),
-                        ifrom({Item.honey_bread: 1}),
-                        (45.667, 45.667),
-                    ),
-                    Crafting(
-                        ifrom({Item.barley: 1, Item.water: 1}),
-                        ifrom({Item.bread: 1}),
-                        (40.667, 40.667),
-                    ),
-                    Crafting(
-                        ifrom({Item.barley: 1, Item.water: 1, Item.honey: 1}),
-                        ifrom({Item.honey_bread: 1}),
-                        (45.667, 45.667),
-                    ),
+                    [
+                        Crafting(
+                            ifrom({Item.barley: 1, Item.water: 1, Item.honey: 1}),
+                            ifrom({Item.honey_bread: 1}),
+                            izeros(),
+                            (45.667, 45.667),
+                        ),
+                        Crafting(
+                            ifrom({Item.barley: 1, Item.water: 1}),
+                            ifrom({Item.bread: 1}),
+                            izeros(),
+                            (40.667, 40.667),
+                        ),
+                        Crafting(
+                            ifrom({Item.barley: 1, Item.water: 1, Item.honey: 1}),
+                            ifrom({Item.honey_bread: 1}),
+                            izeros(),
+                            (45.667, 45.667),
+                        ),
+                    ]
                 ],
                 10,
             )
@@ -859,16 +890,20 @@ def building_from_name(name: Bname) -> Building:
             return BaseBuilding(
                 name,
                 [
-                    Crafting(
-                        ifrom({Item.fur_garment: 1, Item.iron: 1}),
-                        ifrom({Item.studded_fur_garment: 1}),
-                        (49, 49),
-                    ),
-                    Crafting(
-                        ifrom({Item.fur_garment: 1, Item.iron: 1, Item.gold: 1}),
-                        ifrom({Item.golden_fur_garment: 1}),
-                        (49, 49),
-                    ),
+                    [
+                        Crafting(
+                            ifrom({Item.fur_garment: 1, Item.iron: 1}),
+                            ifrom({Item.studded_fur_garment: 1}),
+                            izeros(),
+                            (49, 49),
+                        ),
+                        Crafting(
+                            ifrom({Item.fur_garment: 1, Item.iron: 1, Item.gold: 1}),
+                            ifrom({Item.golden_fur_garment: 1}),
+                            izeros(),
+                            (49, 49),
+                        ),
+                    ]
                 ],
                 10,
             )
@@ -877,85 +912,112 @@ def building_from_name(name: Bname) -> Building:
             # TODO hm maybe could be extracted? timings at least
             return BaseBuilding(
                 name,
-                craftings=[
-                    Crafting(ifrom({Item.iron: 1, Item.log: 1}), ifrom({i: 1}), dt)
-                    for i in {
-                        Item.pick,
-                        Item.felling_axe,
-                        Item.shovel,
-                        Item.hammer,
-                        Item.hunting_spear,
-                        Item.scythe,
-                        Item.bread_paddle,
-                        Item.kitchen_tools,
-                    }
-                ]
-                + [
-                    Crafting(ifrom({Item.iron: 1}), ifrom({Item.needles: 2}), dt),
-                    Crafting(
-                        ifrom({Item.reed: 1, Item.log: 1}),
-                        ifrom({Item.basket: 1}),
-                        dt,
-                    ),
-                    Crafting(ifrom({Item.iron: 1}), ifrom({Item.fire_tongs: 1}), dt),
-                    Crafting(ifrom({Item.reed: 2}), ifrom({Item.fishing_net: 1}), dt),
+                crafting_levels=[
+                    [
+                        Crafting(
+                            ifrom({Item.iron: 1, Item.log: 1}),
+                            ifrom({i: 1}),
+                            izeros(),
+                            dt,
+                        )
+                        for i in {
+                            Item.pick,
+                            Item.felling_axe,
+                            Item.shovel,
+                            Item.hammer,
+                            Item.hunting_spear,
+                            Item.scythe,
+                            Item.bread_paddle,
+                            Item.kitchen_tools,
+                        }
+                    ]
+                    + [
+                        Crafting(
+                            ifrom({Item.iron: 1}),
+                            ifrom({Item.needles: 2}),
+                            izeros(),
+                            dt,
+                        ),
+                        Crafting(
+                            ifrom({Item.reed: 1, Item.log: 1}),
+                            ifrom({Item.basket: 1}),
+                            izeros(),
+                            dt,
+                        ),
+                        Crafting(
+                            ifrom({Item.iron: 1}),
+                            ifrom({Item.fire_tongs: 1}),
+                            izeros(),
+                            dt,
+                        ),
+                        Crafting(
+                            ifrom({Item.reed: 2}),
+                            ifrom({Item.fishing_net: 1}),
+                            izeros(),
+                            dt,
+                        ),
+                    ]
                 ],
                 pause=10,
             )
         case Bname.tavern:
             # TODO here we wrote all combinations
-            # does it really model the right thing in a total cycle?
-            # if consumed uniformly?
             # this part could be coded? but not clear how we model a full cycle
             return BaseBuilding(
                 name,
-                craftings=[
-                    Crafting(
-                        ifrom({Item.fruit: 1}),
-                        ifrom({Item.ration: 1}),
-                        (55, 55),
-                        # TODO how does that work with maximization? that we prefer the two-input solution?
-                        # not just prefer, the mechanics require it when both are available
-                        unless={Item.smoked_fish, Item.smoked_meat},
-                    ),
-                    Crafting(
-                        ifrom({Item.bread: 1}),
-                        ifrom({Item.ration: 1}),
-                        (55, 55),
-                        unless={Item.smoked_fish, Item.smoked_meat},
-                    ),
-                    Crafting(
-                        ifrom({Item.smoked_fish: 1}),
-                        ifrom({Item.ration: 1}),
-                        (55, 55),
-                        unless={Item.fruit, Item.bread},
-                    ),
-                    Crafting(
-                        ifrom({Item.smoked_meat: 1}),
-                        ifrom({Item.ration: 1}),
-                        (55, 55),
-                        unless={Item.fruit, Item.bread},
-                    ),
-                    Crafting(
-                        ifrom({Item.fruit: 1, Item.smoked_fish: 1}),
-                        ifrom({Item.ration: 2}),
-                        (74, 74),
-                    ),
-                    Crafting(
-                        ifrom({Item.fruit: 1, Item.smoked_meat: 1}),
-                        ifrom({Item.ration: 2}),
-                        (74, 74),
-                    ),
-                    Crafting(
-                        ifrom({Item.bread: 1, Item.smoked_fish: 1}),
-                        ifrom({Item.ration: 2}),
-                        (74, 74),
-                    ),
-                    Crafting(
-                        ifrom({Item.bread: 1, Item.smoked_meat: 1}),
-                        ifrom({Item.ration: 2}),
-                        (74, 74),
-                    ),
+                crafting_levels=[
+                    [
+                        Crafting(
+                            ifrom({Item.fruit: 1, Item.smoked_fish: 1}),
+                            ifrom({Item.ration: 2}),
+                            izeros(),
+                            (74, 74),
+                        ),
+                        Crafting(
+                            ifrom({Item.fruit: 1, Item.smoked_meat: 1}),
+                            ifrom({Item.ration: 2}),
+                            izeros(),
+                            (74, 74),
+                        ),
+                        Crafting(
+                            ifrom({Item.bread: 1, Item.smoked_fish: 1}),
+                            ifrom({Item.ration: 2}),
+                            izeros(),
+                            (74, 74),
+                        ),
+                        Crafting(
+                            ifrom({Item.bread: 1, Item.smoked_meat: 1}),
+                            ifrom({Item.ration: 2}),
+                            izeros(),
+                            (74, 74),
+                        ),
+                    ],
+                    [
+                        Crafting(
+                            ifrom({Item.fruit: 1}),
+                            ifrom({Item.ration: 1}),
+                            izeros(),
+                            (55, 55),
+                        ),
+                        Crafting(
+                            ifrom({Item.bread: 1}),
+                            ifrom({Item.ration: 1}),
+                            izeros(),
+                            (55, 55),
+                        ),
+                        Crafting(
+                            ifrom({Item.smoked_fish: 1}),
+                            ifrom({Item.ration: 1}),
+                            izeros(),
+                            (55, 55),
+                        ),
+                        Crafting(
+                            ifrom({Item.smoked_meat: 1}),
+                            ifrom({Item.ration: 1}),
+                            izeros(),
+                            (55, 55),
+                        ),
+                    ],
                 ],
                 pause=0,
             )
@@ -963,16 +1025,20 @@ def building_from_name(name: Bname) -> Building:
             return BaseBuilding(
                 name,
                 [
-                    Crafting(
-                        ifrom({Item.log: 1, Item.fish: 2}),
-                        ifrom({Item.smoked_fish: 2}),
-                        (54, 54),
-                    ),
-                    Crafting(
-                        ifrom({Item.log: 1, Item.meat: 2}),
-                        ifrom({Item.smoked_meat: 2}),
-                        (54, 54),
-                    ),
+                    [
+                        Crafting(
+                            ifrom({Item.log: 1, Item.fish: 2}),
+                            ifrom({Item.smoked_fish: 2}),
+                            izeros(),
+                            (54, 54),
+                        ),
+                        Crafting(
+                            ifrom({Item.log: 1, Item.meat: 2}),
+                            ifrom({Item.smoked_meat: 2}),
+                            izeros(),
+                            (54, 54),
+                        ),
+                    ]
                 ],
                 0,
             )
@@ -980,21 +1046,26 @@ def building_from_name(name: Bname) -> Building:
             return BaseBuilding(
                 name,
                 [
-                    Crafting(
-                        ifrom({Item.coal: 1, Item.iron_ore: 1}),
-                        ifrom({Item.iron: 1}),
-                        (64, 64),
-                    ),
-                    Crafting(
-                        ifrom({Item.coal: 1, Item.gold_ore: 1}),
-                        ifrom({Item.gold: 1}),
-                        (66, 66),
-                    ),
-                    Crafting(
-                        ifrom({Item.coal: 1, Item.iron_ore: 1}),
-                        ifrom({Item.iron: 1}),
-                        (64, 64),
-                    ),
+                    [
+                        Crafting(
+                            ifrom({Item.coal: 1, Item.iron_ore: 1}),
+                            ifrom({Item.iron: 1}),
+                            izeros(),
+                            (64, 64),
+                        ),
+                        Crafting(
+                            ifrom({Item.coal: 1, Item.gold_ore: 1}),
+                            ifrom({Item.gold: 1}),
+                            izeros(),
+                            (66, 66),
+                        ),
+                        Crafting(
+                            ifrom({Item.coal: 1, Item.iron_ore: 1}),
+                            ifrom({Item.iron: 1}),
+                            izeros(),
+                            (64, 64),
+                        ),
+                    ]
                 ],
                 0,
             )
@@ -1002,21 +1073,26 @@ def building_from_name(name: Bname) -> Building:
             return BaseBuilding(
                 name,
                 [
-                    Crafting(
-                        ifrom({Item.coal: 1, Item.iron: 1}),
-                        ifrom({Item.short_sword: 1}),
-                        (58, 58),
-                    ),
-                    Crafting(
-                        ifrom({Item.coal: 1, Item.iron: 2}),
-                        ifrom({Item.long_sword: 1}),
-                        (58, 58),
-                    ),
-                    Crafting(
-                        ifrom({Item.coal: 1, Item.iron: 1}),
-                        ifrom({Item.helmet: 1}),
-                        (68, 68),
-                    ),
+                    [
+                        Crafting(
+                            ifrom({Item.coal: 1, Item.iron: 1}),
+                            ifrom({Item.short_sword: 1}),
+                            izeros(),
+                            (58, 58),
+                        ),
+                        Crafting(
+                            ifrom({Item.coal: 1, Item.iron: 2}),
+                            ifrom({Item.long_sword: 1}),
+                            izeros(),
+                            (58, 58),
+                        ),
+                        Crafting(
+                            ifrom({Item.coal: 1, Item.iron: 1}),
+                            ifrom({Item.helmet: 1}),
+                            izeros(),
+                            (68, 68),
+                        ),
+                    ]
                 ],
                 10,
             )
@@ -1024,71 +1100,83 @@ def building_from_name(name: Bname) -> Building:
             return BaseBuilding(
                 name,
                 [
-                    Crafting(
-                        ifrom({Item.coal: 1, Item.iron: 2, Item.gold: 1}),
-                        ifrom({Item.broadsword: 1}),
-                        (58.8, 58.8),
-                    ),
-                    Crafting(
-                        ifrom({Item.coal: 2, Item.iron: 2, Item.gold: 1}),
-                        ifrom({Item.double_edged_sword: 1}),
-                        (58.8, 58.8),
-                    ),
-                    Crafting(
-                        ifrom({Item.coal: 2, Item.iron: 2, Item.gold: 1}),
-                        ifrom({Item.golden_helmet: 1}),
-                        (68.8, 68.8),
-                    ),
-                    Crafting(
-                        ifrom({Item.coal: 1, Item.iron: 2, Item.gold: 1}),
-                        ifrom({Item.broadsword: 1}),
-                        (58.8, 58.8),
-                    ),
-                    Crafting(
-                        ifrom({Item.coal: 2, Item.iron: 2, Item.gold: 1}),
-                        ifrom({Item.double_edged_sword: 1}),
-                        (58.8, 58.8),
-                    ),
+                    [
+                        Crafting(
+                            ifrom({Item.coal: 1, Item.iron: 2, Item.gold: 1}),
+                            ifrom({Item.broadsword: 1}),
+                            izeros(),
+                            (58.8, 58.8),
+                        ),
+                        Crafting(
+                            ifrom({Item.coal: 2, Item.iron: 2, Item.gold: 1}),
+                            ifrom({Item.double_edged_sword: 1}),
+                            izeros(),
+                            (58.8, 58.8),
+                        ),
+                        Crafting(
+                            ifrom({Item.coal: 2, Item.iron: 2, Item.gold: 1}),
+                            ifrom({Item.golden_helmet: 1}),
+                            izeros(),
+                            (68.8, 68.8),
+                        ),
+                        Crafting(
+                            ifrom({Item.coal: 1, Item.iron: 2, Item.gold: 1}),
+                            ifrom({Item.broadsword: 1}),
+                            izeros(),
+                            (58.8, 58.8),
+                        ),
+                        Crafting(
+                            ifrom({Item.coal: 2, Item.iron: 2, Item.gold: 1}),
+                            ifrom({Item.double_edged_sword: 1}),
+                            izeros(),
+                            (58.8, 58.8),
+                        ),
+                    ]
                 ],
                 10,
             )
         case Bname.reindeer_farm:
-            # TODO it actually makes meat, even when only fur is needed
-            # maybe after all this part needs to just be code?
             return BaseBuilding(
                 name,
                 [
-                    Crafting(
-                        ifrom({Item.water: 1, Item.barley: 1}),
-                        ifrom({Item.deer: 1}),
-                        (30, 30),
-                    ),
-                    Crafting(
-                        ifrom({Item.water: 1, Item.barley: 1}),
-                        ifrom({Item.fur: 1}),
-                        (38.6, 38.6),
-                    ),
-                    Crafting(
-                        ifrom({Item.water: 1, Item.barley: 1}),
-                        ifrom({Item.deer: 1}),
-                        (30, 30),
-                    ),
-                    Crafting(
-                        ifrom({Item.water: 1, Item.barley: 1}),
-                        ifrom({Item.fur: 1}),
-                        (38.6, 38.6),
-                    ),
-                    Crafting(
-                        ifrom({Item.water: 1, Item.barley: 1}),
-                        ifrom({Item.deer: 1}),
-                        (30, 30),
-                    ),
-                    Crafting(
-                        ifrom({Item.water: 1, Item.barley: 1}),
-                        # TODO this one makes when fur is needed, meat is extra and could be over
-                        ifrom({Item.fur: 1, Item.meat: 1}),
-                        (42.2, 42.2),
-                    ),
+                    [
+                        Crafting(
+                            ifrom({Item.water: 1, Item.barley: 1}),
+                            ifrom({Item.deer: 1}),
+                            izeros(),
+                            (30, 30),
+                        ),
+                        Crafting(
+                            ifrom({Item.water: 1, Item.barley: 1}),
+                            ifrom({Item.fur: 1}),
+                            izeros(),
+                            (38.6, 38.6),
+                        ),
+                        Crafting(
+                            ifrom({Item.water: 1, Item.barley: 1}),
+                            ifrom({Item.deer: 1}),
+                            izeros(),
+                            (30, 30),
+                        ),
+                        Crafting(
+                            ifrom({Item.water: 1, Item.barley: 1}),
+                            ifrom({Item.fur: 1}),
+                            izeros(),
+                            (38.6, 38.6),
+                        ),
+                        Crafting(
+                            ifrom({Item.water: 1, Item.barley: 1}),
+                            ifrom({Item.deer: 1}),
+                            izeros(),
+                            (30, 30),
+                        ),
+                        Crafting(
+                            ifrom({Item.water: 1, Item.barley: 1}),
+                            ifrom({Item.fur: 1}),
+                            ifrom({Item.meat: 1}),
+                            (42.2, 42.2),
+                        ),
+                    ]
                 ],
                 0,
             )
@@ -1102,50 +1190,58 @@ def building_from_name(name: Bname) -> Building:
             # TODO also not modeling soldier production, how to treat them?
             return BaseBuilding(
                 name,
-                [  # attack 1
-                    Crafting(
-                        # TODO hmm ok just one of many foods ... dont have a good way to model it
-                        # and which one would be taken, random uniform, always first?
-                        ifrom({Item.long_sword: 1, food: 1}),
-                        ifrom({Item.scrap_iron: 1}),
-                        (36 + 6, 36 + 6),  # NOTE not sure about the +6
-                    )
-                    for food in {Item.bread, Item.smoked_fish, Item.smoked_meat}
-                ]
-                + [  # attack 2
-                    Crafting(
-                        ifrom({Item.broadsword: 1, Item.bread: 1, meat: 1}),
-                        ifrom({Item.scrap_iron: 2}),
-                        (36 + 6, 36 + 6),  # NOTE not sure about the +6
-                    )
-                    for meat in {Item.smoked_fish, Item.smoked_meat}
-                ]
-                + [  # attack 3
-                    Crafting(
-                        ifrom({Item.double_edged_sword: 1, Item.beer: 1, meat: 1}),
-                        ifrom({Item.scrap_iron: 1, Item.mixed_scrap_metal: 1}),
-                        (36 + 6, 36 + 6),  # NOTE not sure about the +6
-                    )
-                    for meat in {Item.smoked_fish, Item.smoked_meat}
-                ]
-                + [  # health 1
-                    Crafting(
-                        ifrom({Item.helmet: 1, food1: 1, food2: 1}),
-                        ifrom({}),
-                        (36 + 6, 36 + 6),  # NOTE not sure about the +6
-                    )
-                    for food1 in {Item.bread, Item.beer}
-                    for food2 in {Item.smoked_fish, Item.smoked_meat}
-                ]
-                + [  # defense 1
-                    Crafting(
-                        ifrom({Item.studded_fur_garment: 1, food1: 1, food2: 1}),
-                        # TODO how does this go with maximization? we might not care for old_* and scrap metal, but we dont want to limit it
-                        ifrom({Item.old_fur_garment: 1}),
-                        (36 + 6, 36 + 6),  # NOTE not sure about the +6
-                    )
-                    for food1 in {Item.bread, Item.beer}
-                    for food2 in {Item.smoked_fish, Item.smoked_meat}
+                [
+                    [  # attack 1
+                        Crafting(
+                            # TODO hmm ok just one of many foods ... dont have a good way to model it
+                            # and which one would be taken, random uniform, always first?
+                            ifrom({Item.long_sword: 1, food: 1}),
+                            # TODO technically it backpressures on soldier level needed?
+                            izeros(),
+                            ifrom({Item.scrap_iron: 1}),
+                            (36 + 6, 36 + 6),  # NOTE not sure about the +6
+                        )
+                        for food in {Item.bread, Item.smoked_fish, Item.smoked_meat}
+                    ]
+                    + [  # attack 2
+                        Crafting(
+                            ifrom({Item.broadsword: 1, Item.bread: 1, meat: 1}),
+                            izeros(),
+                            ifrom({Item.scrap_iron: 2}),
+                            (36 + 6, 36 + 6),  # NOTE not sure about the +6
+                        )
+                        for meat in {Item.smoked_fish, Item.smoked_meat}
+                    ]
+                    + [  # attack 3
+                        Crafting(
+                            ifrom({Item.double_edged_sword: 1, Item.beer: 1, meat: 1}),
+                            izeros(),
+                            ifrom({Item.scrap_iron: 1, Item.mixed_scrap_metal: 1}),
+                            (36 + 6, 36 + 6),  # NOTE not sure about the +6
+                        )
+                        for meat in {Item.smoked_fish, Item.smoked_meat}
+                    ]
+                    + [  # health 1
+                        Crafting(
+                            ifrom({Item.helmet: 1, food1: 1, food2: 1}),
+                            ifrom({}),
+                            izeros(),
+                            (36 + 6, 36 + 6),  # NOTE not sure about the +6
+                        )
+                        for food1 in {Item.bread, Item.beer}
+                        for food2 in {Item.smoked_fish, Item.smoked_meat}
+                    ]
+                    + [  # defense 1
+                        Crafting(
+                            ifrom({Item.studded_fur_garment: 1, food1: 1, food2: 1}),
+                            izeros(),
+                            # TODO how does this go with maximization? we might not care for old_* and scrap metal, but we dont want to limit it
+                            ifrom({Item.old_fur_garment: 1}),
+                            (36 + 6, 36 + 6),  # NOTE not sure about the +6
+                        )
+                        for food1 in {Item.bread, Item.beer}
+                        for food2 in {Item.smoked_fish, Item.smoked_meat}
+                    ]
                 ],
                 0,
             )
@@ -1153,57 +1249,64 @@ def building_from_name(name: Bname) -> Building:
             # TODO same as for training camp
             return BaseBuilding(
                 name,
-                [  # attack 4
-                    Crafting(
-                        ifrom({Item.long_sword: 1, food1: 1, food2: 1}),
-                        ifrom({}),
-                        (28.8 + 6, 28.8 + 6),  # NOTE not sure about the +6
-                    )
-                    for food1 in {Item.honey_bread, Item.mead}
-                    for food2 in {Item.smoked_fish, Item.smoked_meat}
-                ]
-                + [  # attack 5
-                    Crafting(
-                        # TODO not clear of food2 is two of the same, or any two ...
-                        ifrom({Item.broadsword: 1, food1: 1, food2: 2}),
-                        ifrom({Item.scrap_iron: 2}),
-                        (28.8 + 6, 28.8 + 6),  # NOTE not sure about the +6
-                    )
-                    for food1 in {Item.honey_bread, Item.mead}
-                    for food2 in {Item.smoked_fish, Item.smoked_meat}
-                ]
-                + [  # attack 6
-                    Crafting(
-                        ifrom(
-                            {
-                                Item.double_edged_sword: 1,
-                                Item.honey_bread: 1,
-                                Item.mead: 1,
-                                food: 1,
-                            }
-                        ),
-                        ifrom({Item.scrap_iron: 1, Item.mixed_scrap_metal: 1}),
-                        (28.8 + 6, 28.8 + 6),  # NOTE not sure about the +6
-                    )
-                    for food in {Item.smoked_fish, Item.smoked_meat}
-                ]
-                + [  # defense 2
-                    Crafting(
-                        ifrom({Item.golden_fur_garment: 1, food1: 1, food2: 1}),
-                        ifrom({Item.scrap_iron: 1, Item.old_fur_garment: 1}),
-                        (36 + 6, 36 + 6),  # NOTE not sure about the +6
-                    )
-                    for food1 in {Item.honey_bread, Item.mead}
-                    for food2 in {Item.smoked_fish, Item.smoked_meat}
-                ]
-                + [  # health 2
-                    Crafting(
-                        ifrom({Item.golden_helmet: 1, food1: 1, food2: 1}),
-                        ifrom({Item.scrap_iron: 1}),
-                        (32.4 + 6, 32.4 + 6),  # NOTE not sure about the +6
-                    )
-                    for food1 in {Item.honey_bread, Item.mead}
-                    for food2 in {Item.smoked_fish, Item.smoked_meat}
+                [
+                    [  # attack 4
+                        Crafting(
+                            ifrom({Item.long_sword: 1, food1: 1, food2: 1}),
+                            ifrom({}),
+                            izeros(),
+                            (28.8 + 6, 28.8 + 6),  # NOTE not sure about the +6
+                        )
+                        for food1 in {Item.honey_bread, Item.mead}
+                        for food2 in {Item.smoked_fish, Item.smoked_meat}
+                    ]
+                    + [  # attack 5
+                        Crafting(
+                            # TODO not clear of food2 is two of the same, or any two ...
+                            ifrom({Item.broadsword: 1, food1: 1, food2: 2}),
+                            izeros(),
+                            ifrom({Item.scrap_iron: 2}),
+                            (28.8 + 6, 28.8 + 6),  # NOTE not sure about the +6
+                        )
+                        for food1 in {Item.honey_bread, Item.mead}
+                        for food2 in {Item.smoked_fish, Item.smoked_meat}
+                    ]
+                    + [  # attack 6
+                        Crafting(
+                            ifrom(
+                                {
+                                    Item.double_edged_sword: 1,
+                                    Item.honey_bread: 1,
+                                    Item.mead: 1,
+                                    food: 1,
+                                }
+                            ),
+                            izeros(),
+                            ifrom({Item.scrap_iron: 1, Item.mixed_scrap_metal: 1}),
+                            (28.8 + 6, 28.8 + 6),  # NOTE not sure about the +6
+                        )
+                        for food in {Item.smoked_fish, Item.smoked_meat}
+                    ]
+                    + [  # defense 2
+                        Crafting(
+                            ifrom({Item.golden_fur_garment: 1, food1: 1, food2: 1}),
+                            izeros(),
+                            ifrom({Item.scrap_iron: 1, Item.old_fur_garment: 1}),
+                            (36 + 6, 36 + 6),  # NOTE not sure about the +6
+                        )
+                        for food1 in {Item.honey_bread, Item.mead}
+                        for food2 in {Item.smoked_fish, Item.smoked_meat}
+                    ]
+                    + [  # health 2
+                        Crafting(
+                            ifrom({Item.golden_helmet: 1, food1: 1, food2: 1}),
+                            izeros(),
+                            ifrom({Item.scrap_iron: 1}),
+                            (32.4 + 6, 32.4 + 6),  # NOTE not sure about the +6
+                        )
+                        for food1 in {Item.honey_bread, Item.mead}
+                        for food2 in {Item.smoked_fish, Item.smoked_meat}
+                    ]
                 ],
                 0,
             )
@@ -1568,31 +1671,21 @@ def consumption_from_allocated(allocated: list[Allocated]) -> Ivec:
     return isum(alloc.take_total() for alloc in allocated)
 
 
-def production_from_allocated(allocated: list[Allocated]) -> Ivec:
-    return isum(alloc.make_total() for alloc in allocated)
+def full_production_from_allocated(allocated: list[Allocated]) -> Ivec:
+    return isum(alloc.make_full_total() for alloc in allocated)
 
 
 def flood_forward(allocated: list[Allocated]) -> list[Allocated]:
     for _ in range(20):
         prev_allocated = allocated
 
-        allocated = [
-            alloc.__replace__(
-                make_local=izeros(),
-                make_remote=alloc.building.produces_ips(alloc.take_total()),
-            )
-            for alloc in allocated
-        ]
-
-        for alloc in allocated:
-            assert all(v >= 0.0 for v in alloc.make_total().data.values()), (
-                alloc.make_total()
-            )
+        allocated = [alloc.flooded() for alloc in allocated]
+        assert all(alloc.is_make_nonnegative() for alloc in allocated)
 
         consumption = consumption_from_allocated(allocated)
-        production = production_from_allocated(allocated)
+        production = full_production_from_allocated(allocated)
 
-        # surplus = production.sub(consumption)
+        # TODO surplus = production.sub(consumption) -> could we vectorize or at least make it easier to understand?
         for item in Item:
             surplus = production[item] - consumption[item]
             if surplus <= 0.0:
@@ -1604,25 +1697,22 @@ def flood_forward(allocated: list[Allocated]) -> list[Allocated]:
             total_demand = sum(demands)
             if total_demand <= 0.0:
                 continue
-            ratio = min(surplus / total_demand, 1.0)
+            ratio = clipped(0.0, surplus / total_demand, 1.0)
             allocated = [
                 alloc.__replace__(
                     take_local=izeros(),
                     take_remote=alloc.take_total().add(ifrom({item: demand * ratio})),
                 )
-                for alloc, demand in sip(allocated, demands)
+                for alloc, demand in zips(allocated, demands)
             ]
 
-        for alloc in allocated:
-            assert all(v >= 0.0 for v in alloc.make_total().data.values()), (
-                alloc.make_total()
-            )
+        assert all(alloc.is_make_nonnegative() for alloc in allocated)
 
         # TODO this could be computed in one go above
         allocated = [
             alloc.__replace__(
                 flood_usage=alloc.building.usage_for(
-                    alloc.take_total(), alloc.make_total()
+                    alloc.take_total(), alloc.make_full_total()
                 )
             )
             for alloc in allocated
@@ -1631,7 +1721,7 @@ def flood_forward(allocated: list[Allocated]) -> list[Allocated]:
         if have_allocations_converged(prev_allocated, allocated):
             return allocated
 
-    print("flodding didnt converge")
+    print("flooding didnt converge")
     return allocated
 
 
@@ -1640,25 +1730,26 @@ def prefer_local(allocated: list[Allocated]) -> list[Allocated]:
     allocated = list(allocated)
     for block_id in block_ids:
         block_allocated_ids = [
-            i for i, alloc in enumerate(allocated) if id(alloc.block) == block_id
+            i for (i, alloc) in enumerate(allocated) if id(alloc.block) == block_id
         ]
         block_allocated = [allocated[i] for i in block_allocated_ids]
         block_consumption = consumption_from_allocated(block_allocated)
-        block_production = production_from_allocated(block_allocated)
+        block_production = full_production_from_allocated(block_allocated)
         for item in Item:
             if block_consumption[item] > 0.0:
                 ratio_take = block_production[item] / block_consumption[item]
-                ratio_take = min(ratio_take, 1.0)
+                ratio_take = clipped(0.0, ratio_take, 1.0)
             else:
                 ratio_take = 0.0
             if block_production[item] > 0.0:
                 ratio_make = block_consumption[item] / block_production[item]
-                ratio_make = min(ratio_make, 1.0)
+                ratio_make = clipped(0.0, ratio_make, 1.0)
             else:
                 ratio_make = 0.0
             for i in block_allocated_ids:
                 total_take = allocated[i].take_total()
-                total_make = allocated[i].make_total()
+                total_make_main = allocated[i].make_main_total()
+                total_make_aux = allocated[i].make_aux_total()
                 allocated[i] = allocated[i].__replace__(
                     take_remote=allocated[i].take_remote.updated(
                         {item: (1.0 - ratio_take) * total_take[item]}
@@ -1666,11 +1757,17 @@ def prefer_local(allocated: list[Allocated]) -> list[Allocated]:
                     take_local=allocated[i].take_local.updated(
                         {item: ratio_take * total_take[item]}
                     ),
-                    make_remote=allocated[i].make_remote.updated(
-                        {item: (1.0 - ratio_make) * total_make[item]}
+                    make_main_remote=allocated[i].make_main_remote.updated(
+                        {item: (1.0 - ratio_make) * total_make_main[item]}
                     ),
-                    make_local=allocated[i].make_local.updated(
-                        {item: ratio_make * total_make[item]}
+                    make_aux_remote=allocated[i].make_aux_remote.updated(
+                        {item: (1.0 - ratio_make) * total_make_aux[item]}
+                    ),
+                    make_main_local=allocated[i].make_main_local.updated(
+                        {item: ratio_make * total_make_main[item]}
+                    ),
+                    make_aux_local=allocated[i].make_aux_local.updated(
+                        {item: ratio_make * total_make_aux[item]}
                     ),
                 )
     return allocated
@@ -1707,12 +1804,24 @@ def back_pressure(allocated: list[Allocated]) -> list[Allocated]:
             ]
             block_allocated = [allocated[i] for i in block_allocated_ids]
             block_consumption = isum(alloc.take_local for alloc in block_allocated)
-            block_production = isum(alloc.make_local for alloc in block_allocated)
+            block_production_main = isum(
+                alloc.make_main_local for alloc in block_allocated
+            )
+            block_production_aux = isum(
+                alloc.make_aux_local for alloc in block_allocated
+            )
             block_keep_ratios = ifrom(
                 {
-                    item: min(block_consumption[item] / block_production[item], 1.0)
+                    item: min(
+                        max(
+                            0.0,
+                            (block_consumption[item] - block_production_aux[item])
+                            / block_production_main[item],
+                        ),
+                        1.0,
+                    )
                     for item in Item
-                    if block_production[item] > 0.0
+                    if block_production_main[item] > 0.0
                 }
             )
             block_keep_ratios = block_keep_ratios.updated(
@@ -1720,28 +1829,38 @@ def back_pressure(allocated: list[Allocated]) -> list[Allocated]:
             )
             for i in block_allocated_ids:
                 allocated[i] = allocated[i].__replace__(
-                    make_local=allocated[i].make_local.mul(block_keep_ratios)
+                    make_main_local=allocated[i].make_main_local.mul(block_keep_ratios)
                 )
 
         consumption = isum(alloc.take_remote for alloc in allocated)
-        production = isum(alloc.make_remote for alloc in allocated)
+        production_main = isum(alloc.make_main_remote for alloc in allocated)
+        production_aux = isum(alloc.make_aux_remote for alloc in allocated)
         keep_ratios = ifrom(
             {
-                item: min(consumption[item] / production[item], 1.0)
+                item: min(
+                    max(
+                        0.0,
+                        (consumption[item] - production_aux[item])
+                        / production_main[item],
+                    ),
+                    1.0,
+                )
                 for item in Item
-                if production[item] > 0.0
+                if production_main[item] > 0.0
             }
         )
         keep_ratios = keep_ratios.updated({item: 1.0 for item in leaf_items})
         allocated = [
-            alloc.__replace__(make_remote=alloc.make_remote.mul(keep_ratios))
+            alloc.__replace__(make_main_remote=alloc.make_main_remote.mul(keep_ratios))
             for alloc in allocated
         ]
 
         allocated = [
             back_reallocated(
                 alloc,
-                alloc.building.back_pressure(alloc.take_total(), alloc.make_total()),
+                alloc.building.back_pressure(
+                    alloc.take_total(), alloc.make_full_total()
+                ),
             )
             for alloc in allocated
         ]
@@ -1750,7 +1869,7 @@ def back_pressure(allocated: list[Allocated]) -> list[Allocated]:
         allocated = [
             alloc.__replace__(
                 stable_usage=alloc.building.usage_for(
-                    alloc.take_total(), alloc.make_total()
+                    alloc.take_total(), alloc.make_full_total()
                 )
             )
             for alloc in allocated
@@ -1765,12 +1884,15 @@ def back_pressure(allocated: list[Allocated]) -> list[Allocated]:
 
 # TODO assumes those two are parallel and zip
 def have_allocations_converged(a: list[Allocated], b: list[Allocated]) -> bool:
+    eps: Final = 0.01 / 60
     return all(
-        i.take_local.almost_equal(j.take_local, 0.01 / 60)
-        and i.take_remote.almost_equal(j.take_remote, 0.01 / 60)
-        and i.make_local.almost_equal(j.make_local, 0.01 / 60)
-        and i.make_remote.almost_equal(j.make_remote, 0.01 / 60)
-        for i, j in zip(a, b, strict=True)
+        i.take_local.almost_equal(j.take_local, eps)
+        and i.take_remote.almost_equal(j.take_remote, eps)
+        and i.make_main_local.almost_equal(j.make_main_local, eps)
+        and i.make_aux_local.almost_equal(j.make_aux_local, eps)
+        and i.make_main_remote.almost_equal(j.make_main_remote, eps)
+        and i.make_aux_remote.almost_equal(j.make_aux_remote, eps)
+        for i, j in zips(a, b, strict=True)
     )
 
 
@@ -1780,16 +1902,44 @@ class Allocated:
     building: BuildingCount
     take_local: Ivec
     take_remote: Ivec
-    make_local: Ivec
-    make_remote: Ivec
+    make_main_local: Ivec
+    make_aux_local: Ivec
+    make_main_remote: Ivec
+    make_aux_remote: Ivec
     flood_usage: float
     stable_usage: float
 
     def take_total(self) -> Ivec:
         return isum([self.take_local, self.take_remote])
 
-    def make_total(self) -> Ivec:
-        return isum([self.make_local, self.make_remote])
+    def make_full_total(self) -> Ivec:
+        return isum(
+            [
+                self.make_main_local,
+                self.make_aux_local,
+                self.make_main_remote,
+                self.make_aux_remote,
+            ]
+        )
+
+    def make_main_total(self) -> Ivec:
+        return isum([self.make_main_local, self.make_main_remote])
+
+    def make_aux_total(self) -> Ivec:
+        return isum([self.make_aux_local, self.make_aux_remote])
+
+    def flooded(self) -> Allocated:
+        main, aux = self.building.produces_ips(self.take_total())
+        return self.__replace__(
+            make_main_local=izeros(),
+            make_aux_local=izeros(),
+            make_main_remote=main,
+            make_aux_remote=aux,
+        )
+
+    def is_make_nonnegative(self) -> bool:
+        total = self.make_full_total()
+        return total.is_nonnegative()
 
 
 def fixpoints(blocks: list[Block]) -> Iterator[tuple[bool, list[Allocated]]]:
@@ -1799,8 +1949,10 @@ def fixpoints(blocks: list[Block]) -> Iterator[tuple[bool, list[Allocated]]]:
             building=building,
             take_local=izeros(),
             take_remote=izeros(),
-            make_local=izeros(),
-            make_remote=izeros(),
+            make_main_local=izeros(),
+            make_aux_local=izeros(),
+            make_main_remote=izeros(),
+            make_aux_remote=izeros(),
             flood_usage=0.0,
             stable_usage=0.0,
         )
@@ -1832,4 +1984,5 @@ def last[T](it: Iterable[T]) -> T:
 
 
 def fixpoint(blocks: list[Block]) -> tuple[bool, list[Allocated]]:
+    # TODO would like to count iterations, go forever but have a component that limits, and says converged, and measures time
     return last(fixpoints(blocks))

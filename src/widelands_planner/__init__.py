@@ -305,9 +305,13 @@ def test():
                     + str_from_ivec(alloc.take_remote.smul(60))
                 ),
                 (
-                    str_from_ivec(alloc.make_local.smul(60))
+                    str_from_ivec(alloc.make_main_local.smul(60))
+                    + "/"
+                    + str_from_ivec(alloc.make_aux_local.smul(60))
                     + " + "
-                    + str_from_ivec(alloc.make_remote.smul(60))
+                    + str_from_ivec(alloc.make_main_remote.smul(60))
+                    + "/"
+                    + str_from_ivec(alloc.make_aux_remote.smul(60))
                 ),
             )
             for alloc in allocated
