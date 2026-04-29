@@ -272,6 +272,81 @@ def setup4() -> list[Block]:
     return blocks
 
 
+def setup5() -> list[Block]:
+    buildings = get_buildings()
+    block = Block(
+        imports=set(),
+        buildings=[
+            BuildingCount(
+                20,
+                ConfiguredGenericBuilding(
+                    buildings[Bname.well],
+                    takes=set(),
+                    makes={Item.water},
+                    speed=1.0,
+                ),
+            ),
+            BuildingCount(
+                20,
+                ConfiguredGenericBuilding(
+                    buildings[Bname.farm],
+                    takes=set(),
+                    makes={Item.barley},
+                    speed=1.0,
+                ),
+            ),
+            BuildingCount(
+                20,
+                ConfiguredGenericBuilding(
+                    buildings[Bname.reindeer_farm],
+                    takes={Item.water, Item.barley},
+                    makes={Item.deer, Item.fur, Item.meat},
+                    speed=1.0,
+                ),
+            ),
+            BuildingCount(
+                1,
+                ConfiguredGenericBuilding(
+                    buildings[Bname.foresters_house],
+                    takes=set(),
+                    makes={Item.tree},
+                    speed=1.0,
+                ),
+            ),
+            BuildingCount(
+                1,
+                ConfiguredGenericBuilding(
+                    buildings[Bname.woodcutters_house],
+                    takes={Item.tree},
+                    makes={Item.log},
+                    speed=1.0,
+                ),
+            ),
+            BuildingCount(
+                1,
+                ConfiguredGenericBuilding(
+                    buildings[Bname.smokery],
+                    takes={Item.meat, Item.log},
+                    makes={Item.smoked_meat},
+                    speed=1.0,
+                ),
+            ),
+            BuildingCount(
+                1,
+                ConfiguredGenericBuilding(
+                    buildings[Bname.tavern],
+                    takes={Item.smoked_meat},
+                    makes={Item.ration},
+                    speed=1.0,
+                ),
+            ),
+        ],
+        exports=set(),
+    )
+
+    return [block]
+
+
 def str_from_ivec(vec: Ivec) -> str:
     data = [f"{i.name}: {v:.1f}" for i, v in vec.data.items() if v != 0.0]
     return "{" + ", ".join(data) + "}"
@@ -285,7 +360,8 @@ def test():
     # blocks = setup1()
     # blocks = setup2()
     # blocks = setup3()
-    blocks = setup4()
+    # blocks = setup4()
+    blocks = setup5()
 
     converged, allocated = fixpoint(blocks)
 

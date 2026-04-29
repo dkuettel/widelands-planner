@@ -1798,6 +1798,7 @@ def back_pressure(allocated: list[Allocated]) -> list[Allocated]:
         # TODO should it be a setting what we want to have unlimited?
         # TODO because we dont treat None vs 0.0 very well, I have this hack for now
         # TODO also, in a way, would this change per iteration?
+        # TODO still causes problems, eg: one well, one reindeer farm, farm wants water, but is stuck at 0.0, and then well gets no back-pressure (but still stays local)
         leaf_items = set(Item) - {
             item for alloc in allocated for item in alloc.take_total().nonzero_items()
         }
