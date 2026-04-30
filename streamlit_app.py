@@ -551,7 +551,7 @@ def main():
 # save all the time, keep a timeline? save version to load old stuff?
 # order buildings, by feed-into-order?
 # instead, say what blocks you want to import from? a map would almost be easier :) with a flow
-# long sword, in tight production, almost always skipped because it needs to iron, unfortunate dynamics
+# long sword, in tight production, almost always skipped because it needs 2 iron, unfortunate dynamics
 # when gaming out a new addition, would be nice to see the diff until "confirmed", or todo add click checkboxes
 #    (almost like a new block, and then merge it in when done)
 #    and/or a way for the blocks to be repeated, this is how you play it usually
@@ -562,6 +562,9 @@ def main():
 #    for the soldiers, assuming no war, we need every level same thruput, as the first one, obviously
 #    and thats partly the same building, so it would naturally just adapt and do whatever?
 #    so maybe lets try a forward-wave computation
+
+# TODO tools and weapons could be meta items, almost no use in seeing them listed individually (could that even make the optimization easier?)
+# TODO right now i dont see if some things are totally missing, if there is no configured building around, it wont show +/- indicators, and also wont show take/make in the info side
 
 if __name__ == "__main__":
     main()
