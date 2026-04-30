@@ -1876,7 +1876,9 @@ def back_pressure(allocated: list[Allocated]) -> list[Allocated]:
             alloc.__replace__(
                 stable_usage=alloc.building.usage_for(
                     alloc.take_total(), alloc.make_full_total()
-                )
+                ),
+                # TODO leaf items is a global thing anyway, we could have it as state and decide then and there
+                is_infinite=alloc.building.building.makes <= leaf_items,
             )
             for alloc in allocated
         ]
@@ -1912,14 +1914,18 @@ def rounded_allocations(allocations: Sequence[Allocated]) -> list[Allocated]:
 class Allocated:
     block: Block
     building: BuildingCount
+
     take_local: Ivec
     take_remote: Ivec
+
     make_main_local: Ivec
     make_aux_local: Ivec
     make_main_remote: Ivec
     make_aux_remote: Ivec
+
     flood_usage: float
     stable_usage: float
+    is_infinite: bool  # if all production are leaf items, we are never limited
 
     def take_total(self) -> Ivec:
         return isum([self.take_local, self.take_remote])
@@ -1977,6 +1983,7 @@ def fixpoints(blocks: list[Block]) -> Iterator[tuple[bool, list[Allocated]]]:
             make_aux_remote=izeros(),
             flood_usage=0.0,
             stable_usage=0.0,
+            is_infinite=False,
         )
         for block in blocks
         for building in block.buildings

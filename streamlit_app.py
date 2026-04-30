@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import math
 from collections.abc import Iterator, Mapping
 from dataclasses import dataclass
 from enum import StrEnum
@@ -12,7 +13,7 @@ from uuid import uuid4
 import pandas as pd
 import streamlit as st
 
-from widelands_planner import state
+from widelands_planner import state, str_from_ivec, str_from_usage
 
 
 @dataclass(frozen=True)
@@ -395,10 +396,10 @@ def fn_change_building_type(count_state: CountState):
 def main():
     st.set_page_config(page_title="widelands planner", layout="wide")
 
+    # TODO danger: state you didnt touch will not be defaulted right now
     session = SessionState.from_key()
     buildings = state.get_buildings()
-    # TODO danger: state you didnt touch will not be defaulted right now
-    balances, balance = get_state(session, buildings)
+    # balances, balance = get_state(session, buildings)
     bnames = sorted(state.Bname)
     items = state.get_items()
 
@@ -409,46 +410,19 @@ def main():
         exports = block.exports.get(set())
         blocks.append(state.Block(imports, counts, exports))
 
-    # for opt, solution in state.fixpoint(blocks):
-    #     pass  # NOTE taking only the last one
-    # with st.container(border=True, width=800):
-    #     st.write(opt)  # pyright: ignore[reportPossiblyUnboundVariable]
-    #     for count, (local, remote) in solution:  # pyright: ignore[reportPossiblyUnboundVariable]
-    #         st.subheader(count.building.building.name)
-    #         with st.container(horizontal=True):
-    #             st_ivec(local, False)
-    #             st_ivec(remote, False)
+    # TODO hook up to streamlit again, with additional info
+    # probably remove explicit makes, and explicit import export, just show what actually happens
+    # maybe the finally another play
+    # could replace some of the optimization with solvers, might be easier to understand actually, still iterations though
 
-    # match state.qp(blocks):
-    #     case None:
-    #         st.write("no solution")
-    #     case list(names), Solution() as s:
-    #         st.write(s.found)
-    #         for name, value in zip(names, s.x, strict=True):  # pyright: ignore[reportArgumentType, reportUnknownVariableType]
-    #             if "usage" in name:
-    #                 st.write(name, round(value, 1))  # pyright: ignore[reportUnknownArgumentType]
-
-    # for losses, counts in state.opt(blocks):
-    #     with st.container(border=True):
-    #         st.write(losses)
-    #         st.write(", ".join(f"{id(bc)} @{100 * u:.0f}%" for (bc, u) in counts))
-
-    # take, make = state.iterative(blocks)
-    # st.subheader("take")
-    # st_ivec(take, hints=False)
-    # st.subheader("make")
-    # st_ivec(make, hints=False)
-    # TODO ok kinda works, but logic when not enough input is still a bit wrong
-    # either way, want to fix that, want to add utilization to buildings
-    # and show them, still all global, see if it makes sense, and allows
-    # for more flexible modeling
-    # then add warnings to keep blocks isolated, but that is not really
-    # changing the optimization, its just an after the fact analysis
+    status, block_allocations = state.fixpoint(blocks)
+    st.text(status)
 
     with st.sidebar:
         st.subheader("global balance")
-        with st.container(gap=None):
-            st_ivec(balance, hints=True)
+        # TODO in theory, the solution goes for balanced
+        # with st.container(gap=None):
+        #     st_ivec(balance, hints=True)
         st.divider()
         st.button("add block", on_click=add_block)
         st.divider()
@@ -461,8 +435,8 @@ def main():
         st.write("no blocks")
     else:
         tabs = st.tabs(block_names)
-        for tab, block, block_balance in zip(
-            tabs, session.blocks, balances, strict=True
+        for tab, block, allocations in state.zips(
+            tabs, session.blocks, block_allocations
         ):
             with tab:
                 meta, counts = st.columns([1, 4], gap="medium")
@@ -474,9 +448,9 @@ def main():
                             key=block.imports.key,
                             label_visibility="collapsed",
                         )
-                        st_ivec(block_balance.imports, hints=False)
+                        # st_ivec(block_balance.imports, hints=False)
                     with st.expander("local", expanded=True):
-                        st_ivec(block_balance.local, hints=True)
+                        pass  # st_ivec(block_balance.local, hints=True)
                     with st.expander("exports", expanded=True):
                         st.multiselect(
                             "exports",
@@ -484,7 +458,7 @@ def main():
                             key=block.exports.key,
                             label_visibility="collapsed",
                         )
-                        st_ivec(block_balance.exports, hints=False)
+                        # st_ivec(block_balance.exports, hints=False)
                     with st.expander("block", expanded=False):
                         st.text_input("name", key=block.name.key)
                         st.button(
@@ -493,11 +467,12 @@ def main():
                             on_click=block.remove_fn(),
                         )
                 with counts, st.container(horizontal=False, border=False):
-                    for count_state in block.counts:
-                        with st.container(horizontal=True, border=True):
+                    for count_state, alloc in state.zips(block.counts, allocations):
+                        with st.container(
+                            horizontal=True, border=True, vertical_alignment="center"
+                        ):
                             bname = count_state.bname.get()
                             building = buildings[bname]
-                            # TODO could give hint here based on local balance?
                             st.number_input(
                                 "count",
                                 key=count_state.count.key,
@@ -505,6 +480,29 @@ def main():
                                 label_visibility="collapsed",
                                 width=150,
                             )
+                            if (
+                                math.ceil(alloc.building.count * alloc.stable_usage)
+                                < alloc.building.count
+                            ):
+                                st.markdown(":material/remove:")
+                            elif alloc.is_infinite:
+                                st.markdown(":material/all_inclusive:")
+                            elif alloc.stable_usage < 1.0:
+                                st.markdown(":material/check:")
+                            else:
+                                st.markdown(":material/add:")
+                            with st.container(gap=None, width=40):
+                                # TODO can we show here also how much overuse in theory if too little produced? so we know how much we should add?
+                                # maybe instead a button that goes into planning mode and it just plays thru until a stable situation and shows the target counts?
+                                st.markdown(
+                                    f"**{round(alloc.stable_usage * 100)}%**",
+                                    text_alignment="right",
+                                )
+                                st.markdown(
+                                    f":small[+{round((alloc.flood_usage - alloc.stable_usage) * 100)}%]",
+                                    text_alignment="right",
+                                )
+                            # TODO could give hint here based on local balance?
                             # TODO show here utilization, and a mark if more needed
                             # maybe bold if potentially too much, not if exporting!
                             # utilization is total usage / production, we should have that now
@@ -545,26 +543,26 @@ def main():
                                     key=f"button.block[{block.id}].count[{count_state.id}].remove",
                                     on_click=count_state.remove_fn(),
                                 )
-                            with st.container(horizontal=True, gap="small"):
-                                # TODO shouldnt have to give default values here, add to constructor?
-                                st.write(
-                                    "".join(
-                                        [
-                                            "**",
-                                            " + ".join(
-                                                sorted(count_state.takes.get(set()))
-                                            )
-                                            or "{}",
-                                            " -> ",
-                                            " + ".join(
-                                                sorted(count_state.makes.get(set()))
-                                            )
-                                            or "{}",
-                                            "**",
-                                        ]
-                                    )
+                            with st.container(
+                                horizontal=True,
+                                gap="small",
+                                vertical_alignment="center",
+                            ):
+                                # TODO this is a bit unreadable still
+                                st.code(
+                                    ""
+                                    + str_from_ivec(alloc.take_local.smul(60))
+                                    + " + "
+                                    + str_from_ivec(alloc.take_remote.smul(60))
+                                    + " -> "
+                                    + str_from_ivec(alloc.make_main_local.smul(60))
+                                    + "/"
+                                    + str_from_ivec(alloc.make_aux_local.smul(60))
+                                    + " + "
+                                    + str_from_ivec(alloc.make_main_remote.smul(60))
+                                    + "/"
+                                    + str_from_ivec(alloc.make_aux_remote.smul(60))
                                 )
-                                st.write(f"speed@{count_state.speed.get() * 100}%")
                     # TODO could have buttons for all the likely candidates?
                     # and even the non-configures ones plus 1, other add and plus?
                     # but that could also be in the local meta info right next to it?
