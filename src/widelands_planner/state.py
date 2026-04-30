@@ -1367,18 +1367,7 @@ def get_block_balance(block: Block) -> BlockBalance:
     for i, b in balance.data.items():
         if b == 0:
             continue
-        if i in block.imports:
-            if b > 0:
-                imports[i] = 0
-            else:
-                imports[i] = -b
-        elif i in block.exports:
-            if b > 0:
-                exports[i] = b
-            else:
-                local[i] = b
-        else:
-            local[i] = b
+        local[i] = b
     return BlockBalance(
         imports=ifrom(imports),
         local=ifrom(local),

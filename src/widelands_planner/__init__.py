@@ -18,7 +18,6 @@ from widelands_planner.state import (
 def setup1() -> list[Block]:
     buildings = get_buildings()
     block = Block(
-        imports=set(),
         buildings=[
             BuildingCount(
                 1,
@@ -39,7 +38,6 @@ def setup1() -> list[Block]:
                 ),
             ),
         ],
-        exports=set(),
     )
 
     return [block]
@@ -48,7 +46,6 @@ def setup1() -> list[Block]:
 def setup2() -> list[Block]:
     buildings = get_buildings()
     block1 = Block(
-        imports=set(),
         buildings=[
             BuildingCount(
                 1,
@@ -69,10 +66,8 @@ def setup2() -> list[Block]:
                 ),
             ),
         ],
-        exports=set(),
     )
     block2 = Block(
-        imports=set(),
         buildings=[
             BuildingCount(
                 1,
@@ -84,7 +79,6 @@ def setup2() -> list[Block]:
                 ),
             ),
         ],
-        exports=set(),
     )
 
     return [block1, block2]
@@ -93,7 +87,6 @@ def setup2() -> list[Block]:
 def setup3() -> list[Block]:
     buildings = get_buildings()
     block1 = Block(
-        imports=set(),
         buildings=[
             BuildingCount(
                 3,
@@ -114,10 +107,8 @@ def setup3() -> list[Block]:
                 ),
             ),
         ],
-        exports=set(),
     )
     block2 = Block(
-        imports=set(),
         buildings=[
             BuildingCount(
                 4,
@@ -174,7 +165,6 @@ def setup3() -> list[Block]:
                 ),
             ),
         ],
-        exports=set(),
     )
 
     return [block1, block2]
@@ -186,7 +176,6 @@ def setup4() -> list[Block]:
     for _ in range(2):
         blocks.append(
             Block(
-                imports=set(),
                 buildings=[
                     BuildingCount(
                         3,
@@ -261,7 +250,6 @@ def setup4() -> list[Block]:
                         ),
                     ),
                 ],
-                exports=set(),
             )
         )
 
@@ -271,7 +259,6 @@ def setup4() -> list[Block]:
 def setup5() -> list[Block]:
     buildings = get_buildings()
     block = Block(
-        imports=set(),
         buildings=[
             BuildingCount(
                 20,
@@ -337,7 +324,6 @@ def setup5() -> list[Block]:
                 ),
             ),
         ],
-        exports=set(),
     )
 
     return [block]
