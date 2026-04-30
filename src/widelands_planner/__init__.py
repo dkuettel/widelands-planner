@@ -1,8 +1,5 @@
 from __future__ import annotations
 
-from collections import deque
-from collections.abc import Iterable
-
 from tabulate import tabulate
 
 from widelands_planner.state import (
@@ -15,7 +12,6 @@ from widelands_planner.state import (
     Ivec,
     fixpoint,
     get_buildings,
-    isum,
 )
 
 
@@ -363,12 +359,11 @@ def test():
     # blocks = setup4()
     blocks = setup5()
 
-    status, allocated = fixpoint(blocks)
+    status, blocked_allocated = fixpoint(blocks)
 
     print(status)
 
-    for i, block in enumerate(blocks):
-        ids = {id(building) for building in block.buildings}
+    for i, allocated in enumerate(blocked_allocated):
         data = [
             (
                 alloc.building.count,
@@ -390,7 +385,6 @@ def test():
                 ),
             )
             for alloc in allocated
-            if id(alloc.building) in ids
         ]
         print()
         print(f"block {i}:")
