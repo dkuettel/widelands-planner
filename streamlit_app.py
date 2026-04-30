@@ -386,13 +386,7 @@ def main():
         counts = [get_state_block_count(buildings, count) for count in block.counts]
         blocks.append(state.Block(counts))
 
-    # TODO hook up to streamlit again, with additional info
-    # probably remove explicit makes, and explicit import export, just show what actually happens
-    # maybe the finally another play
-    # could replace some of the optimization with solvers, might be easier to understand actually, still iterations though
-
     status, block_allocations = state.fixpoint(blocks)
-    st.text(status)
 
     with st.sidebar:
         st.subheader("global")
@@ -410,6 +404,8 @@ def main():
         with st.container(horizontal=True):
             st.button("save", on_click=save_state)
             st.button("load", on_click=load_state)
+        st.divider()
+        st.markdown(f":small[{status}]")
 
     block_names = [block.name.get() for block in session.blocks]
     if len(block_names) == 0:
