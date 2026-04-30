@@ -1349,10 +1349,7 @@ def get_usage_ratios(buildings: list[BuildingCount]) -> Ivec:
 
 @dataclass(frozen=True)
 class Block:
-    # TODO how to check that this is consistent? no overlaps?
-    imports: set[Item]
     buildings: list[BuildingCount]
-    exports: set[Item]
 
 
 @dataclass(frozen=True)
@@ -1942,6 +1939,12 @@ class Allocated:
 
     def make_main_total(self) -> Ivec:
         return isum([self.make_main_local, self.make_main_remote])
+
+    def make_local(self) -> Ivec:
+        return isum([self.make_main_local, self.make_aux_local])
+
+    def make_remote(self) -> Ivec:
+        return isum([self.make_main_remote, self.make_aux_remote])
 
     def make_aux_total(self) -> Ivec:
         return isum([self.make_aux_local, self.make_aux_remote])

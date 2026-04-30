@@ -13,7 +13,7 @@ from uuid import uuid4
 import pandas as pd
 import streamlit as st
 
-from widelands_planner import state, str_from_ivec, str_from_usage
+from widelands_planner import state, str_from_ivec
 
 
 @dataclass(frozen=True)
@@ -130,8 +130,6 @@ class BlockState:
     id: str
     name: StrState
     counts: BlockCountState
-    imports: SetState[state.Item]
-    exports: SetState[state.Item]
 
     @classmethod
     def from_key(cls, parent: BlocksState, id: str, key: str):
@@ -140,8 +138,6 @@ class BlockState:
             id=id,
             name=StrState(f"{key}.name", "unnamed block"),
             counts=BlockCountState.from_key(key),
-            imports=SetState(f"{key}.imports", state.Item),
-            exports=SetState(f"{key}.exports", state.Item),
         )
 
     def remove_fn(self):
@@ -209,39 +205,24 @@ def load_state(path: Path | None = None):
     st.session_state.update(state)
 
 
-def st_ivec(ivec: state.Ivec, hints: bool):
-    def f(i: state.Item, ips: float) -> dict[str, str | float]:
-        counts = state.building_count_from_ips(i, ips)
-        # TODO which representative to show? take smallest (best) count?
-        match counts:
-            case [(_name, count), *_]:
-                if not hints or ips >= 0:
-                    return {
-                        "item": f"{i}",
-                        "i/min": 60 * ips,
-                        "repr": count * 100,
-                    }
-                return {
-                    "item": f"{i} :warning:",
-                    "i/min": 60 * ips,
-                    "repr": count * 100,
-                }
-            case _:
-                assert False, (i, ips, counts)
+def st_ivec(ivec: state.Ivec):
+    df = pd.DataFrame(
+        [
+            {
+                "i/min": 60 * ips,
+                "item": i.name,
+            }
+            for (i, ips) in ivec.sorted()
+        ]
+    )
 
-    df = pd.DataFrame([f(i, ips) for (i, ips) in ivec.sorted()])
     # TODO polars is better, but styling doesnt work with st.table
     # but we could just use polars to inject html? more control
     # it just needs some work to fit into the streamlit visual design
     st.table(  # pyright: ignore[reportUnknownMemberType]
         df.style.format(
             {
-                "i/min": "{:.2f}",
-                "repr": lambda v: (
-                    f"{v:.0f}%"
-                    if (not hints or v <= 100)  # pyright: ignore[reportOperatorIssue]
-                    else f"**{v:.0f}%**"
-                ),
+                "i/min": "{:.1f}",
             }
         ),
         border="horizontal",
@@ -352,10 +333,8 @@ def get_state(
 def get_state_block(
     buildings: Mapping[state.Bname, state.Building], block: BlockState
 ) -> state.BlockBalance:
-    imports = block.imports.get(set())
     counts = [get_state_block_count(buildings, count) for count in block.counts]
-    exports = block.exports.get(set())
-    balance = state.get_block_balance(state.Block(imports, counts, exports))
+    balance = state.get_block_balance(state.Block(counts))
     return balance
 
 
@@ -401,14 +380,11 @@ def main():
     buildings = state.get_buildings()
     # balances, balance = get_state(session, buildings)
     bnames = sorted(state.Bname)
-    items = state.get_items()
 
     blocks: list[state.Block] = []
     for block in session.blocks:
-        imports = block.imports.get(set())
         counts = [get_state_block_count(buildings, count) for count in block.counts]
-        exports = block.exports.get(set())
-        blocks.append(state.Block(imports, counts, exports))
+        blocks.append(state.Block(counts))
 
     # TODO hook up to streamlit again, with additional info
     # probably remove explicit makes, and explicit import export, just show what actually happens
@@ -419,10 +395,15 @@ def main():
     st.text(status)
 
     with st.sidebar:
-        st.subheader("global balance")
-        # TODO in theory, the solution goes for balanced
-        # with st.container(gap=None):
-        #     st_ivec(balance, hints=True)
+        st.subheader("global")
+        with st.container(gap=None):
+            st_ivec(
+                state.isum(
+                    alloc.make_remote()
+                    for allocations in block_allocations
+                    for alloc in allocations
+                ),
+            )
         st.divider()
         st.button("add block", on_click=add_block)
         st.divider()
@@ -442,23 +423,17 @@ def main():
                 meta, counts = st.columns([1, 4], gap="medium")
                 with meta:
                     with st.expander("imports", expanded=True):
-                        st.multiselect(
-                            "imports",
-                            items,
-                            key=block.imports.key,
-                            label_visibility="collapsed",
+                        st_ivec(
+                            state.isum(alloc.take_remote for alloc in allocations),
                         )
-                        # st_ivec(block_balance.imports, hints=False)
                     with st.expander("local", expanded=True):
-                        pass  # st_ivec(block_balance.local, hints=True)
-                    with st.expander("exports", expanded=True):
-                        st.multiselect(
-                            "exports",
-                            items,
-                            key=block.exports.key,
-                            label_visibility="collapsed",
+                        st_ivec(
+                            state.isum(alloc.make_local() for alloc in allocations),
                         )
-                        # st_ivec(block_balance.exports, hints=False)
+                    with st.expander("exports", expanded=True):
+                        st_ivec(
+                            state.isum(alloc.make_remote() for alloc in allocations),
+                        )
                     with st.expander("block", expanded=False):
                         st.text_input("name", key=block.name.key)
                         st.button(
