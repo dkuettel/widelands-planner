@@ -4,7 +4,7 @@ import math
 import re
 import time
 from collections import defaultdict, deque
-from collections.abc import Iterable, Iterator, Mapping, Sequence, Set
+from collections.abc import Generator, Iterable, Iterator, Mapping, Sequence, Set
 from dataclasses import dataclass
 from enum import StrEnum
 from functools import cache, partial
@@ -1677,8 +1677,12 @@ def full_production_from_allocated(allocated: list[Allocated]) -> Ivec:
     return isum(alloc.make_full_total() for alloc in allocated)
 
 
-def flood_forward(allocated: list[Allocated]) -> list[Allocated]:
-    for _ in range(20):
+def flood_forward(
+    allocated: list[Allocated],
+) -> Generator[list[Allocated], None, list[Allocated]]:
+    prev_allocated = None
+
+    while not have_allocations_converged(prev_allocated, allocated):
         prev_allocated = allocated
 
         allocated = [alloc.flooded() for alloc in allocated]
@@ -1720,10 +1724,8 @@ def flood_forward(allocated: list[Allocated]) -> list[Allocated]:
             for alloc in allocated
         ]
 
-        if have_allocations_converged(prev_allocated, allocated):
-            return allocated
+        yield allocated
 
-    print("flooding didnt converge")
     return allocated
 
 
@@ -1786,10 +1788,13 @@ def back_reallocated(alloc: Allocated, limit: Ivec) -> Allocated:
     )
 
 
-def back_pressure(allocated: list[Allocated]) -> list[Allocated]:
+def back_pressure(
+    allocated: list[Allocated],
+) -> Generator[list[Allocated], None, list[Allocated]]:
     block_ids = {id(alloc.block) for alloc in allocated}
+    prev_allocated = None
 
-    for _ in range(20):
+    while not have_allocations_converged(prev_allocated, allocated):
         prev_allocated = allocated
         allocated = list(allocated)
 
@@ -1880,10 +1885,8 @@ def back_pressure(allocated: list[Allocated]) -> list[Allocated]:
             for alloc in allocated
         ]
 
-        if have_allocations_converged(prev_allocated, allocated):
-            return allocated
+        yield allocated
 
-    print("`back_pressure` didnt converge")
     return allocated
 
 
@@ -1891,7 +1894,9 @@ ips_eps: Final = 0.01 / 60
 
 
 # TODO assumes those two are parallel and zip
-def have_allocations_converged(a: list[Allocated], b: list[Allocated]) -> bool:
+def have_allocations_converged(a: list[Allocated] | None, b: list[Allocated]) -> bool:
+    if a is None:
+        return False
     return all(
         i.take_local.almost_equal(j.take_local, ips_eps)
         and i.take_remote.almost_equal(j.take_remote, ips_eps)
@@ -1923,6 +1928,22 @@ class Allocated:
     flood_usage: float
     stable_usage: float
     is_infinite: bool  # if all production are leaf items, we are never limited
+
+    @classmethod
+    def from_init(cls, block: Block, building: BuildingCount):
+        return cls(
+            block=block,
+            building=building,
+            take_local=izeros(),
+            take_remote=izeros(),
+            make_main_local=izeros(),
+            make_aux_local=izeros(),
+            make_main_remote=izeros(),
+            make_aux_remote=izeros(),
+            flood_usage=0.0,
+            stable_usage=0.0,
+            is_infinite=False,
+        )
 
     def take_total(self) -> Ivec:
         return isum([self.take_local, self.take_remote])
@@ -1973,41 +1994,24 @@ class Allocated:
         )
 
 
-def fixpoints(blocks: list[Block]) -> Iterator[tuple[bool, list[Allocated]]]:
+def fixpoints(blocks: list[Block]) -> Iterator[list[Allocated]]:
+    prev_allocated = None
     allocated = [
-        Allocated(
-            block=block,
-            building=building,
-            take_local=izeros(),
-            take_remote=izeros(),
-            make_main_local=izeros(),
-            make_aux_local=izeros(),
-            make_main_remote=izeros(),
-            make_aux_remote=izeros(),
-            flood_usage=0.0,
-            stable_usage=0.0,
-            is_infinite=False,
-        )
+        Allocated.from_init(block=block, building=building)
         for block in blocks
         for building in block.buildings
     ]
 
-    if len(allocated) == 0:
-        yield True, []
-        return
-
-    for _ in range(20):
-        yield False, allocated
+    while not have_allocations_converged(prev_allocated, allocated):
         prev_allocated = allocated
-        allocated = flood_forward(allocated)
+
+        allocated = yield from flood_forward(allocated)
         # TODO we could maybe build that into flood_forward eventually?
         allocated = prefer_local(allocated)
-        allocated = back_pressure(allocated)
-        if have_allocations_converged(prev_allocated, allocated):
-            yield True, rounded_allocations(allocated)
-            return
 
-    yield False, allocated
+        allocated = yield from back_pressure(allocated)
+
+        yield rounded_allocations(allocated)
 
 
 def last[T](it: Iterable[T]) -> T:
@@ -2018,18 +2022,19 @@ def last[T](it: Iterable[T]) -> T:
 def fixpoint(blocks: list[Block]) -> tuple[str, list[list[Allocated]]]:
     t = time.perf_counter_ns()
 
-    # TODO maybe better make fixpoints go on forever, and yield even sub iterations, and we decide here if we stop earlier (time, or it count)
     it = fixpoints(blocks)
 
-    converged, allocated = next(it)
-    count = 1
+    count, allocated = 1, next(it)
 
-    for converged, allocated in it:
-        count += 1
+    # NOTE could also stop on max time, not max iterations
+    max_count = 100
+
+    for count, allocated in zip(range(2, max_count + 1), it):
+        pass
 
     dt = round((time.perf_counter_ns() - t) / 1_000_000)
 
-    if converged:
+    if count < max_count:
         status = f"{count} iterations converged in {dt}ms"
     else:
         status = f"{count} iterations did not converge in {dt}ms"
