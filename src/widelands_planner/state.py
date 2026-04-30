@@ -2005,17 +2005,30 @@ def last[T](it: Iterable[T]) -> T:
     return last
 
 
-def fixpoint(blocks: list[Block]) -> tuple[str, list[Allocated]]:
+def fixpoint(blocks: list[Block]) -> tuple[str, list[list[Allocated]]]:
     t = time.perf_counter_ns()
+
     # TODO maybe better make fixpoints go on forever, and yield even sub iterations, and we decide here if we stop earlier (time, or it count)
     it = fixpoints(blocks)
+
     converged, allocated = next(it)
     count = 1
+
     for converged, allocated in it:
         count += 1
+
     dt = round((time.perf_counter_ns() - t) / 1_000_000)
+
     if converged:
         status = f"{count} iterations converged in {dt}ms"
     else:
         status = f"{count} iterations did not converge in {dt}ms"
-    return status, allocated
+
+    # TODO we only block up the allocations when we actually return it
+    # the iterations stay flat, but I think even the iterations would benefit from blocked data
+    by_building = {id(alloc.building): alloc for alloc in allocated}
+    blocked = [
+        [by_building[id(building)] for building in block.buildings] for block in blocks
+    ]
+
+    return status, blocked
