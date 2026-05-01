@@ -405,7 +405,11 @@ def main():
         counts = [get_state_block_count(buildings, count) for count in block.counts]
         blocks.append(state.Block(counts))
 
+    # TODO seems take_total() is most expensive, in flood forward most prominently
+    # just means the main math backbone should be done with np probably
     status, block_allocations = state.fixpoint(blocks)
+    # status, block_allocations = state.profile_fixpoint(blocks)
+    # status, block_allocations = state.pyinstrument_fixpoint(blocks)
 
     with st.sidebar:
         st.subheader("global")

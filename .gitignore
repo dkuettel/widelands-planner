@@ -1,5 +1,6 @@
 /.nd/
 /Session.vim
+/profiles/
 /result
 /state.json
 __pycache__/

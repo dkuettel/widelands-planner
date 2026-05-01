@@ -5,7 +5,9 @@ import re
 import time
 from collections import defaultdict, deque
 from collections.abc import Generator, Iterable, Iterator, Mapping, Sequence, Set
+from cProfile import Profile
 from dataclasses import dataclass
+from datetime import datetime
 from enum import StrEnum
 from functools import cache, partial
 from pathlib import Path
@@ -2158,3 +2160,36 @@ def fixpoint(blocks: list[Block]) -> tuple[str, list[list[Allocated]]]:
     ]
 
     return status, blocked
+
+
+def profile_fixpoint(blocks: list[Block]) -> tuple[str, list[list[Allocated]]]:
+    with Profile() as p:
+        result = fixpoint(blocks)
+
+    now = datetime.now()
+    path = Path(f"./profiles/test-{now.isoformat()}.prof")
+    path.parent.mkdir(exist_ok=True, parents=True)
+
+    # NOTE uv run tool tuna file.prof
+    # TODO results seem strange, is tuna broken? in cli i see more
+    # maybe run this in isolation, outside of streamlit
+    # hmm or maybe run a second time? or need to reload in tuna?
+    p.dump_stats(path)
+
+    link = Path("./profiles/latest")
+    link.unlink(missing_ok=True)
+    link.symlink_to(path.name)
+
+    return result
+
+
+def pyinstrument_fixpoint(blocks: list[Block]) -> tuple[str, list[list[Allocated]]]:
+    from pyinstrument import Profiler
+
+    with Profiler() as p:
+        result = fixpoint(blocks)
+
+    time.sleep(5)
+    p.open_in_browser()
+
+    return result
