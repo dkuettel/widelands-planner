@@ -421,42 +421,21 @@ def examples():
         print_block(allocated)
 
 
-def usage():
+def wants():
+    building = building_from_name(Bname.tavern)
     count = BuildingCount(
         1,
         ConfiguredGenericBuilding(
-            building_from_name(Bname.blacksmithy),
-            {Item.iron},
-            {Item.fire_tongs, Item.needles},
+            building,
+            building.get_take_items(),
+            building.get_make_items(),
             1.0,
         ),
     )
-    # u = count.usage_for(
-    #     ifrom({i: 0.0 for i in Item}).updated({Item.iron: 0.012473960607232402}),
-    #     ifrom({i: 0.0 for i in Item}).updated(
-    #         {Item.fire_tongs: 0.006236980303616201, Item.needles: 0.012473960607232402},
-    #     ),
-    # )
-    w = count.building.wants_ips(Item.iron)
+    w = count.building.wants_ips(Item.fruit)
     print(w)
-    # TODO this only gives 94% ... but wants didnt want more? we give exactly what it wanted
-    # ok wants ips and usage_for dont agree, which one is wrong?
-    # u = count.usage_for(
-    #     ifrom({Item.iron: 0.012473960607232402}),
-    #     ifrom(
-    #         {Item.fire_tongs: 0.006236980303616201, Item.needles: 0.012473960607232402},
-    #     ),
-    # )
-    # w = w / 0.93
-    u = count.usage_for(
-        ifrom({Item.iron: w}),
-        ifrom(
-            {Item.fire_tongs: w / 2, Item.needles: w},
-        ),
-    )
-    print(u)
 
 
 def test():
     examples()
-    # usage()
+    # wants()

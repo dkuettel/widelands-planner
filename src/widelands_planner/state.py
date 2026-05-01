@@ -580,11 +580,13 @@ class BaseBuilding:
         # TODO would it converge faster/better if we based it on the previous feasible allocation?
         levels: list[list[Crafting]] = self.get_enabled_crafting_levels(takes, makes)
         craftings: list[Crafting] = [crafting for level in levels for crafting in level]
+        craftings = [crafting for crafting in craftings if crafting.take[item] > 0.0]
         enabled: list[bool | None] = [None] * len(craftings)
         while None in enabled:
             for k in range(len(craftings)):
                 if enabled[k] is not None:
                     continue
+                upper_bound = craftings[k].take[item] * self.pause
                 lower_bound = craftings[k].take[item] * self.pause
                 for i in range(len(craftings)):
                     if i == k:
@@ -595,18 +597,25 @@ class BaseBuilding:
                     )
                     match enabled[i]:
                         case None:
+                            upper_bound += clipped(0, factor, None)
                             lower_bound += clipped(None, factor, 0)
                         case True:
+                            upper_bound += factor
                             lower_bound += factor
                         case False:
                             pass
+                assert lower_bound <= upper_bound, (lower_bound, upper_bound)
                 if lower_bound >= 0.0:
                     enabled[k] = True
                     break
+                if upper_bound <= 0.0:
+                    enabled[k] = False
+                    break
             else:
                 assert False, (
-                    "could not find a single crafting that dominates the rest",
+                    "could not find a single crafting that has become unconditional",
                     craftings,
+                    enabled,
                 )
         if not any(enabled):
             return 0.0
