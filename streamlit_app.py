@@ -13,7 +13,7 @@ from uuid import uuid4
 import pandas as pd
 import streamlit as st
 
-from widelands_planner import state, str_from_ivec
+from widelands_planner import state
 
 
 @dataclass(frozen=True)
@@ -522,17 +522,23 @@ def main():
                                 # TODO this is a bit unreadable still
                                 st.code(
                                     ""
-                                    + str_from_ivec(alloc.take_local.smul(60))
+                                    + state.str_from_ivec(alloc.take_local.smul(60))
                                     + " + "
-                                    + str_from_ivec(alloc.take_remote.smul(60))
+                                    + state.str_from_ivec(alloc.take_remote.smul(60))
                                     + " -> "
-                                    + str_from_ivec(alloc.make_main_local.smul(60))
+                                    + state.str_from_ivec(
+                                        alloc.make_main_local.smul(60)
+                                    )
                                     + "/"
-                                    + str_from_ivec(alloc.make_aux_local.smul(60))
+                                    + state.str_from_ivec(alloc.make_aux_local.smul(60))
                                     + " + "
-                                    + str_from_ivec(alloc.make_main_remote.smul(60))
+                                    + state.str_from_ivec(
+                                        alloc.make_main_remote.smul(60)
+                                    )
                                     + "/"
-                                    + str_from_ivec(alloc.make_aux_remote.smul(60))
+                                    + state.str_from_ivec(
+                                        alloc.make_aux_remote.smul(60)
+                                    )
                                 )
                     # TODO could have buttons for all the likely candidates?
                     # and even the non-configures ones plus 1, other add and plus?

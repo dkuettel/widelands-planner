@@ -18,9 +18,45 @@ from qpsolvers import (
     solve_problem,  # pyright: ignore[reportUnknownVariableType]
 )
 from qpsolvers.problem import Problem
+from tabulate import tabulate
 from torch import Tensor, nn
 
 zips = partial(zip, strict=True)
+
+
+def str_from_usage(alloc: Allocated) -> str:
+    return f"{round(alloc.stable_usage * 100)}% + {round((alloc.flood_usage - alloc.stable_usage) * 100)}%"
+
+
+def str_from_ivec(vec: Ivec) -> str:
+    data = [f"{i.name}: {v:.2f}" for i, v in vec.data.items() if v != 0.0]
+    return "{" + ", ".join(data) + "}"
+
+
+def print_block(allocated: Sequence[Allocated]):
+    data = [
+        (
+            alloc.building.count,
+            str_from_usage(alloc),
+            alloc.building.building.building.name,
+            (
+                str_from_ivec(alloc.take_local.smul(60))
+                + " + "
+                + str_from_ivec(alloc.take_remote.smul(60))
+            ),
+            (
+                str_from_ivec(alloc.make_main_local.smul(60))
+                + "/"
+                + str_from_ivec(alloc.make_aux_local.smul(60))
+                + " + "
+                + str_from_ivec(alloc.make_main_remote.smul(60))
+                + "/"
+                + str_from_ivec(alloc.make_aux_remote.smul(60))
+            ),
+        )
+        for alloc in allocated
+    ]
+    print(tabulate(data, headers=["#", "%", "name", "take i/m", "make i/m"]))
 
 
 def clipped(low: float | None, value: float, high: float | None) -> float:
@@ -271,6 +307,11 @@ class Crafting:
     def __post_init__(self):
         assert self.seconds_range[0] <= self.seconds_range[1]
 
+    def seconds(self, speed: float) -> float:
+        assert 0 <= speed <= 1, speed
+        short, long = self.seconds_range
+        return speed * short + (1 - speed) * long
+
 
 @dataclass(frozen=True)
 class BaseBuilding:
@@ -447,7 +488,6 @@ class BaseBuilding:
                 {i: (limit[i] if i in limit.data else math.inf) for i in Item}
             )
         assert all(v >= 0.0 for v in limit.data.values()), limit
-        # TODO make preferences, two level, fill first level first, like in the bakery
         # TODO actually we can only control the takes, not the makes, right?
         crafting_levels: list[list[Crafting]] = self.get_enabled_crafting_levels(
             takes, makes
@@ -490,6 +530,7 @@ class BaseBuilding:
                 limit_constraints, key=lambda x: x[1], default=(None, 1.0)
             )
             ratio = min(allocation_ratio, limit_ratio)
+            # TODO will it work when they are both true? or is there a problem when they should be both true but eps makes only one true?
             used_allocation_ratio = ratio == allocation_ratio
             used_limit_ratio = ratio == limit_ratio
             assert 0 <= ratio, (
@@ -498,6 +539,7 @@ class BaseBuilding:
                 limit_item,
                 limit_ratio,
             )
+            # TODO doesnt this break used_limit_ratio and used_allocation_ratio in some cases?
             old_used, used = used, min(used + ratio, 1.0)
             ratio = used - old_used
             allocation = allocation.sub(take_ips.smul(ratio))
@@ -505,7 +547,9 @@ class BaseBuilding:
             if allocation_item is not None and used_allocation_ratio:
                 allocation.data[allocation_item] = 0.0
             assert all(v >= 0.0 for v in allocation.data.values()), allocation
-            limit = limit.sub(make_main_ips.smul(ratio)).sub(make_aux_ips.smul(ratio))
+            limit = limit.sub(
+                make_main_ips.smul(ratio)
+            )  # TODO i think not, right? .sub(make_aux_ips.smul(ratio))
             limit = limit.low_clipped(0.0)
             if limit_item is not None and used_limit_ratio:
                 limit.data[limit_item] = 0.0
@@ -513,6 +557,7 @@ class BaseBuilding:
             total_take_ips = total_take_ips.add(take_ips.smul(ratio))
             total_make_main_ips = total_make_main_ips.add(make_main_ips.smul(ratio))
             total_make_aux_ips = total_make_aux_ips.add(make_aux_ips.smul(ratio))
+            # TODO repeated with code at the beginning
             crafting_levels = [
                 [
                     crafting
@@ -532,14 +577,45 @@ class BaseBuilding:
     def wants_ips(
         self, takes: set[Item], makes: set[Item], speed: float, item: Item
     ) -> float:
-        # TODO should it be based on current allocation?
+        # TODO would it converge faster/better if we based it on the previous feasible allocation?
         levels: list[list[Crafting]] = self.get_enabled_crafting_levels(takes, makes)
-        candidates = (
-            self.take_make_ips_from_craftings([c], speed)[0][item]
-            for level in levels
-            for c in level
+        craftings: list[Crafting] = [crafting for level in levels for crafting in level]
+        enabled: list[bool | None] = [None] * len(craftings)
+        while None in enabled:
+            for k in range(len(craftings)):
+                if enabled[k] is not None:
+                    continue
+                lower_bound = craftings[k].take[item] * self.pause
+                for i in range(len(craftings)):
+                    if i == k:
+                        continue
+                    factor = (
+                        craftings[k].take[item] * craftings[i].seconds(speed)
+                        - craftings[k].seconds(speed) * craftings[i].take[item]
+                    )
+                    match enabled[i]:
+                        case None:
+                            lower_bound += clipped(None, factor, 0)
+                        case True:
+                            lower_bound += factor
+                        case False:
+                            pass
+                if lower_bound >= 0.0:
+                    enabled[k] = True
+                    break
+            else:
+                assert False, (
+                    "could not find a single crafting that dominates the rest",
+                    craftings,
+                )
+        if not any(enabled):
+            return 0.0
+        enabled_craftings = [
+            crafting for (enabled, crafting) in zips(enabled, craftings) if enabled
+        ]
+        return sum(crafting.take[item] for crafting in enabled_craftings) / (
+            sum(crafting.seconds(speed) for crafting in enabled_craftings) + self.pause
         )
-        return max(candidates, default=0.0)
 
     def limit_waste(
         self, takes: set[Item], makes: set[Item], speed: float, allocation: Ivec
@@ -1686,7 +1762,9 @@ def flood_forward(
             if surplus <= 0.0:
                 continue
             demands = [
-                alloc.building.wants_ips(item) - alloc.take_total()[item]
+                clipped(
+                    0.0, alloc.building.wants_ips(item) - alloc.take_total()[item], None
+                )
                 for alloc in allocated
             ]
             total_demand = sum(demands)
@@ -1700,10 +1778,13 @@ def flood_forward(
                 )
                 for alloc, demand in zips(allocated, demands)
             ]
+            # TODO is it necessary here, or up one level?
+            allocated = [alloc.flooded() for alloc in allocated]
 
         assert all(alloc.is_make_nonnegative() for alloc in allocated)
 
         # TODO this could be computed in one go above
+        # TODO hm usage for with limit for output, did we update the output?
         allocated = [
             alloc.__replace__(
                 flood_usage=alloc.building.usage_for(
@@ -1809,12 +1890,10 @@ def back_pressure(
             )
             block_keep_ratios = ifrom(
                 {
-                    item: min(
-                        max(
-                            0.0,
-                            (block_consumption[item] - block_production_aux[item])
-                            / block_production_main[item],
-                        ),
+                    item: clipped(
+                        0.0,
+                        (block_consumption[item] - block_production_aux[item])
+                        / block_production_main[item],
                         1.0,
                     )
                     for item in Item
@@ -1879,7 +1958,7 @@ def back_pressure(
     return allocated
 
 
-ips_eps: Final = 0.01 / 60
+ips_eps: Final = 0.01 / 5 / 60
 
 
 # TODO assumes those two are parallel and zip
@@ -2001,6 +2080,7 @@ def fixpoints(blocks: list[Block]) -> Iterator[list[Allocated]]:
         allocated = yield from back_pressure(allocated)
 
         yield rounded_allocations(allocated)
+        # yield allocated
 
 
 def last[T](it: Iterable[T]) -> T:
@@ -2016,8 +2096,10 @@ def fixpoint(blocks: list[Block]) -> tuple[str, list[list[Allocated]]]:
     count, allocated = 1, next(it)
 
     # NOTE could also stop on max time, not max iterations
-    max_count = 100
+    max_count = 1000
 
+    # TODO actually this is a bit bad, we could stop inside a flood-back cycle
+    # which makes it not only not converged, but not even "sealed"
     for count, allocated in zip(range(2, max_count + 1), it):
         pass
 
