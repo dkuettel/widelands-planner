@@ -61,6 +61,9 @@ class EnumState[T: StrEnum]:
     def get(self) -> T:
         return st.session_state.setdefault(self.key, self.default)
 
+    def set(self, value: T):
+        st.session_state[self.key] = value
+
 
 @dataclass(frozen=True)
 class SetState[T: StrEnum]:
@@ -120,8 +123,23 @@ class BlockCountState:
             ids=StrListState(f"{key}.ids"),
         )
 
-    def add_fn(self):
-        return self.ids.add
+    def add_fn(self, bname: state.Bname):
+        def fn():
+            id = self.ids.add()
+            # TODO this code overlaps with fn_change_building_type
+            count = CountState.from_key(self, id, f"{self.key}.items.{id}")
+            count.count.set(0)
+            count.bname.set(bname)
+            building = state.get_buildings()[bname]
+            match building:
+                case state.BaseBuilding():
+                    count.takes.set(building.get_take_items())
+                    count.makes.set(building.get_make_items())
+                    count.speed.set(1)
+                case _ as never:
+                    assert_never(never)
+
+        return fn
 
 
 @dataclass(frozen=True)
@@ -151,9 +169,10 @@ class StrListState:
     def get(self) -> list[str]:
         return st.session_state.setdefault(self.key, [])
 
-    def add(self):
+    def add(self) -> str:
         id = uuid4().hex
         self.get().append(id)
+        return id
 
     def remove(self, value: str):
         self.get().remove(value)
@@ -540,14 +559,33 @@ def main():
                                         alloc.make_aux_remote.smul(60)
                                     )
                                 )
-                    # TODO could have buttons for all the likely candidates?
-                    # and even the non-configures ones plus 1, other add and plus?
-                    # but that could also be in the local meta info right next to it?
-                    st.button(
-                        "add building",
-                        key=f"button.block[{block.id}].add",
-                        on_click=block.counts.add_fn(),
-                    )
+                    with st.container(horizontal=True):
+                        # TODO could have buttons for all the likely candidates?
+                        # and even the non-configures ones plus 1, other add and plus?
+                        # but that could also be in the local meta info right next to it?
+                        st.button(
+                            "add building",
+                            key=f"button.block[{block.id}].add",
+                            on_click=block.counts.add_fn(state.Bname.fishers_house),
+                        )
+                        all_take = {
+                            item
+                            for alloc in allocations
+                            for item in alloc.building.building.takes
+                        }
+                        all_make = {
+                            item
+                            for alloc in allocations
+                            for item in alloc.building.building.makes
+                        }
+                        missing_items = all_take - all_make
+                        for name, building in buildings.items():
+                            if missing_items & building.get_make_items():
+                                st.button(
+                                    name.value,
+                                    key=f"button.block[{block.id}].add[{name}]",
+                                    on_click=block.counts.add_fn(name),
+                                )
 
 
 # TODO problems
@@ -568,8 +606,6 @@ def main():
 #    for the soldiers, assuming no war, we need every level same thruput, as the first one, obviously
 #    and thats partly the same building, so it would naturally just adapt and do whatever?
 #    so maybe lets try a forward-wave computation
-
-# TODO right now i dont see if some things are totally missing, if there is no configured building around, it wont show +/- indicators, and also wont show take/make in the info side
 
 if __name__ == "__main__":
     main()
