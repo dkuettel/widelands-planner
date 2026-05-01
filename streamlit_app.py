@@ -607,5 +607,7 @@ def main():
 #    and thats partly the same building, so it would naturally just adapt and do whatever?
 #    so maybe lets try a forward-wave computation
 
+# TODO when buildings are there but with 0 count, then the add/remove/inf indicators are off
+
 if __name__ == "__main__":
     main()
