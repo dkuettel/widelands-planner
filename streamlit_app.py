@@ -210,9 +210,9 @@ def st_ivec(ivec: state.Ivec):
         [
             {
                 "i/min": 60 * ips,
-                "item": i.name,
+                "item": name,
             }
-            for (i, ips) in ivec.sorted()
+            for (name, ips) in sorted(state.summarize_ivec(ivec).items())
         ]
     )
 
@@ -569,7 +569,6 @@ def main():
 #    and thats partly the same building, so it would naturally just adapt and do whatever?
 #    so maybe lets try a forward-wave computation
 
-# TODO tools and weapons could be meta items, almost no use in seeing them listed individually (could that even make the optimization easier?)
 # TODO right now i dont see if some things are totally missing, if there is no configured building around, it wont show +/- indicators, and also wont show take/make in the info side
 
 if __name__ == "__main__":

@@ -29,7 +29,7 @@ def str_from_usage(alloc: Allocated) -> str:
 
 
 def str_from_ivec(vec: Ivec) -> str:
-    data = [f"{i.name}: {v:.2f}" for i, v in vec.data.items() if v != 0.0]
+    data = [f"{i.name}: {v:.2f}" for i, v in sorted(vec.data.items()) if v != 0.0]
     return "{" + ", ".join(data) + "}"
 
 
@@ -271,6 +271,37 @@ class Vec[I]:
 
 
 type Ivec = Vec[Item]
+
+meta_items: Final[dict[Item, str]] = {
+    Item.short_sword: "{small armor}",
+    Item.long_sword: "{small armor}",
+    Item.helmet: "{small armor}",
+    Item.broadsword: "{large armor}",
+    Item.double_edged_sword: "{large armor}",
+    Item.golden_helmet: "{large armor}",
+    Item.pick: "{tools}",
+    Item.felling_axe: "{tools}",
+    Item.shovel: "{tools}",
+    Item.hammer: "{tools}",
+    Item.hunting_spear: "{tools}",
+    Item.scythe: "{tools}",
+    Item.bread_paddle: "{tools}",
+    Item.kitchen_tools: "{tools}",
+    Item.needles: "{tools}",
+    Item.basket: "{tools}",
+    Item.fire_tongs: "{tools}",
+    Item.fishing_net: "{tools}",
+}
+
+
+def summarize_ivec(ivec: Ivec) -> dict[str, float]:
+    sum: dict[str, float] = dict()
+    for i, v in ivec.data.items():
+        if v == 0.0:
+            continue
+        name = meta_items.get(i, i.name)
+        sum[name] = sum.get(name, 0.0) + v
+    return sum
 
 
 def izeros() -> Ivec:
