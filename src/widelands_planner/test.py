@@ -1,15 +1,24 @@
 from __future__ import annotations
 
+import os
+import pickle
+from cProfile import Profile
+from pathlib import Path
+
 from widelands_planner.state import (
     Block,
     Bname,
     BuildingCount,
     ConfiguredGenericBuilding,
+    FixpointSolver,
     Item,
     building_from_name,
     fixpoint,
     get_buildings,
+    have_allocations_converged,
     print_block,
+    profile_fixpoint,
+    zips,
 )
 
 
@@ -480,6 +489,27 @@ def examples():
         print_block(allocated)
 
 
+def bench():
+    blocks = setup7()
+
+    # TODO strange, profiling doesnt work well when the main work is happening in generators
+    # TODO run a clean version and safe result somehow to see later that it still works
+    with Profile() as p:
+        solver = FixpointSolver.from_blocks(blocks)
+        while not solver.has_converged():
+            solver.update()
+        allocated = solver.allocated
+    p.dump_stats("data.prof")
+
+    gt = pickle.loads(Path("./solution.pickle").read_bytes())
+    gt = [alloc for block in gt for alloc in block]
+
+    assert have_allocations_converged(gt, allocated)
+    print("solution is correct")
+
+    # os.system("uv tool run tuna data.prof")
+
+
 def wants():
     building = building_from_name(Bname.tavern)
     count = BuildingCount(
@@ -496,5 +526,6 @@ def wants():
 
 
 def test():
-    examples()
+    # examples()
+    bench()
     # wants()

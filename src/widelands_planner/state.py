@@ -1784,7 +1784,7 @@ def full_production_from_allocated(allocated: list[Allocated]) -> Ivec:
     return isum(alloc.make_full_total() for alloc in allocated)
 
 
-def flood_forward(
+def gen_flood_forward(
     allocated: list[Allocated],
 ) -> Generator[list[Allocated], None, list[Allocated]]:
     prev_allocated = None
@@ -1837,6 +1837,59 @@ def flood_forward(
         ]
 
         yield allocated
+
+    return allocated
+
+
+def flood_forward(allocated: list[Allocated]) -> list[Allocated]:
+    prev_allocated = None
+
+    while not have_allocations_converged(prev_allocated, allocated):
+        prev_allocated = allocated
+
+        allocated = [alloc.flooded() for alloc in allocated]
+        assert all(alloc.is_make_nonnegative() for alloc in allocated)
+
+        consumption = consumption_from_allocated(allocated)
+        production = full_production_from_allocated(allocated)
+
+        # TODO surplus = production.sub(consumption) -> could we vectorize or at least make it easier to understand?
+        for item in Item:
+            surplus = production[item] - consumption[item]
+            if surplus <= 0.0:
+                continue
+            demands = [
+                clipped(
+                    0.0, alloc.building.wants_ips(item) - alloc.take_total()[item], None
+                )
+                for alloc in allocated
+            ]
+            total_demand = sum(demands)
+            if total_demand <= 0.0:
+                continue
+            ratio = clipped(0.0, surplus / total_demand, 1.0)
+            allocated = [
+                alloc.__replace__(
+                    take_local=izeros(),
+                    take_remote=alloc.take_total().add(ifrom({item: demand * ratio})),
+                )
+                for alloc, demand in zips(allocated, demands)
+            ]
+            # TODO is it necessary here, or up one level?
+            allocated = [alloc.flooded() for alloc in allocated]
+
+        assert all(alloc.is_make_nonnegative() for alloc in allocated)
+
+        # TODO this could be computed in one go above
+        # TODO hm usage for with limit for output, did we update the output?
+        allocated = [
+            alloc.__replace__(
+                flood_usage=alloc.building.usage_for(
+                    alloc.take_total(), alloc.make_full_total()
+                )
+            )
+            for alloc in allocated
+        ]
 
     return allocated
 
@@ -1900,7 +1953,7 @@ def back_reallocated(alloc: Allocated, limit: Ivec) -> Allocated:
     )
 
 
-def back_pressure(
+def gen_back_pressure(
     allocated: list[Allocated],
 ) -> Generator[list[Allocated], None, list[Allocated]]:
     block_ids = {id(alloc.block) for alloc in allocated}
@@ -1996,6 +2049,102 @@ def back_pressure(
         ]
 
         yield allocated
+
+    return allocated
+
+
+def back_pressure(allocated: list[Allocated]) -> list[Allocated]:
+    block_ids = {id(alloc.block) for alloc in allocated}
+    prev_allocated = None
+
+    while not have_allocations_converged(prev_allocated, allocated):
+        prev_allocated = allocated
+        allocated = list(allocated)
+
+        # TODO should it be a setting what we want to have unlimited?
+        # TODO because we dont treat None vs 0.0 very well, I have this hack for now
+        # TODO also, in a way, would this change per iteration?
+        # TODO still causes problems, eg: one well, one reindeer farm, farm wants water, but is stuck at 0.0, and then well gets no back-pressure (but still stays local)
+        leaf_items = set(Item) - {
+            item for alloc in allocated for item in alloc.take_total().nonzero_items()
+        }
+
+        for block_id in block_ids:
+            block_allocated_ids = [
+                i for i, alloc in enumerate(allocated) if id(alloc.block) == block_id
+            ]
+            block_allocated = [allocated[i] for i in block_allocated_ids]
+            block_consumption = isum(alloc.take_local for alloc in block_allocated)
+            block_production_main = isum(
+                alloc.make_main_local for alloc in block_allocated
+            )
+            block_production_aux = isum(
+                alloc.make_aux_local for alloc in block_allocated
+            )
+            block_keep_ratios = ifrom(
+                {
+                    item: clipped(
+                        0.0,
+                        (block_consumption[item] - block_production_aux[item])
+                        / block_production_main[item],
+                        1.0,
+                    )
+                    for item in Item
+                    if block_production_main[item] > 0.0
+                }
+            )
+            block_keep_ratios = block_keep_ratios.updated(
+                {item: 1.0 for item in leaf_items}
+            )
+            for i in block_allocated_ids:
+                allocated[i] = allocated[i].__replace__(
+                    make_main_local=allocated[i].make_main_local.mul(block_keep_ratios)
+                )
+
+        consumption = isum(alloc.take_remote for alloc in allocated)
+        production_main = isum(alloc.make_main_remote for alloc in allocated)
+        production_aux = isum(alloc.make_aux_remote for alloc in allocated)
+        keep_ratios = ifrom(
+            {
+                item: min(
+                    max(
+                        0.0,
+                        (consumption[item] - production_aux[item])
+                        / production_main[item],
+                    ),
+                    1.0,
+                )
+                for item in Item
+                if production_main[item] > 0.0
+            }
+        )
+        keep_ratios = keep_ratios.updated({item: 1.0 for item in leaf_items})
+        allocated = [
+            alloc.__replace__(make_main_remote=alloc.make_main_remote.mul(keep_ratios))
+            for alloc in allocated
+        ]
+
+        allocated = [
+            back_reallocated(
+                alloc,
+                alloc.building.back_pressure(
+                    alloc.take_total(), alloc.make_full_total()
+                ),
+            )
+            for alloc in allocated
+        ]
+
+        # TODO this could be computed in one go above
+        allocated = [
+            alloc.__replace__(
+                stable_usage=alloc.building.usage_for(
+                    alloc.take_total(), alloc.make_full_total()
+                ),
+                # TODO leaf items is a global thing anyway, we could have it as state and decide then and there
+                is_infinite=alloc.building.building.makes <= leaf_items,
+            )
+            for alloc in allocated
+        ]
 
     return allocated
 
@@ -2115,11 +2264,11 @@ def fixpoints(blocks: list[Block]) -> Iterator[list[Allocated]]:
     while not have_allocations_converged(prev_allocated, allocated):
         prev_allocated = allocated
 
-        allocated = yield from flood_forward(allocated)
+        allocated = yield from gen_flood_forward(allocated)
         # TODO we could maybe build that into flood_forward eventually?
         allocated = prefer_local(allocated)
 
-        allocated = yield from back_pressure(allocated)
+        allocated = yield from gen_back_pressure(allocated)
 
         yield rounded_allocations(allocated)
         # yield allocated
@@ -2160,6 +2309,37 @@ def fixpoint(blocks: list[Block]) -> tuple[str, list[list[Allocated]]]:
     ]
 
     return status, blocked
+
+
+@dataclass
+class FixpointSolver:
+    allocated: list[Allocated]
+    prev: None | list[Allocated]
+
+    @classmethod
+    def from_blocks(cls, blocks: list[Block]):
+        allocated = [
+            Allocated.from_init(block=block, building=building)
+            for block in blocks
+            for building in block.buildings
+        ]
+        return cls(allocated, None)
+
+    # TODO or just a function that takes allocated and gives? no need for a class? and full control of duration then? and no generators
+    def update(self):
+        self.prev = self.allocated
+        allocated = self.allocated
+
+        allocated = flood_forward(allocated)
+        # TODO we could maybe build that into flood_forward eventually?
+        allocated = prefer_local(allocated)
+
+        allocated = back_pressure(allocated)
+
+        self.allocated = rounded_allocations(allocated)
+
+    def has_converged(self) -> bool:
+        return have_allocations_converged(self.prev, self.allocated)
 
 
 def profile_fixpoint(blocks: list[Block]) -> tuple[str, list[list[Allocated]]]:
