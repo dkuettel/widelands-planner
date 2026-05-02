@@ -2311,35 +2311,26 @@ def fixpoint(blocks: list[Block]) -> tuple[str, list[list[Allocated]]]:
     return status, blocked
 
 
-@dataclass
-class FixpointSolver:
-    allocated: list[Allocated]
-    prev: None | list[Allocated]
+def solver_state_from_blocks(blocks: list[Block]) -> list[Allocated]:
+    return [
+        Allocated.from_init(block=block, building=building)
+        for block in blocks
+        for building in block.buildings
+    ]
 
-    @classmethod
-    def from_blocks(cls, blocks: list[Block]):
-        allocated = [
-            Allocated.from_init(block=block, building=building)
-            for block in blocks
-            for building in block.buildings
-        ]
-        return cls(allocated, None)
 
-    # TODO or just a function that takes allocated and gives? no need for a class? and full control of duration then? and no generators
-    def update(self):
-        self.prev = self.allocated
-        allocated = self.allocated
+def solver_update_state(allocated: list[Allocated]) -> list[Allocated]:
+    allocated = flood_forward(allocated)
+    # TODO we could maybe build that into flood_forward eventually?
+    allocated = prefer_local(allocated)
+    allocated = back_pressure(allocated)
+    return allocated
 
-        allocated = flood_forward(allocated)
-        # TODO we could maybe build that into flood_forward eventually?
-        allocated = prefer_local(allocated)
 
-        allocated = back_pressure(allocated)
-
-        self.allocated = rounded_allocations(allocated)
-
-    def has_converged(self) -> bool:
-        return have_allocations_converged(self.prev, self.allocated)
+def solver_has_converged(
+    prev: None | list[Allocated], allocated: list[Allocated]
+) -> bool:
+    return have_allocations_converged(prev, allocated)
 
 
 def profile_fixpoint(blocks: list[Block]) -> tuple[str, list[list[Allocated]]]:
