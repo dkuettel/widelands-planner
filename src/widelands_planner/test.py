@@ -4,43 +4,36 @@ from widelands_planner.state import (
     Block,
     Bname,
     BuildingCount,
-    ConfiguredBuilding,
     ConfiguredGenericBuilding,
     Item,
     building_from_name,
     fixpoint,
     get_buildings,
-    ifrom,
-    izeros,
     print_block,
 )
 
 
-def setup1() -> list[Block]:
+def make(count: int, name: Bname) -> BuildingCount:
     buildings = get_buildings()
-    block = Block(
-        buildings=[
-            BuildingCount(
-                1,
-                ConfiguredGenericBuilding(
-                    buildings[Bname.foresters_house],
-                    takes=set(),
-                    makes={Item.tree},
-                    speed=1.0,
-                ),
-            ),
-            BuildingCount(
-                3,
-                ConfiguredGenericBuilding(
-                    buildings[Bname.woodcutters_house],
-                    takes={Item.tree},
-                    makes={Item.log},
-                    speed=1.0,
-                ),
-            ),
-        ],
+    b = buildings[name]
+    return BuildingCount(
+        count,
+        ConfiguredGenericBuilding(
+            b,
+            takes=b.get_take_items(),
+            makes=b.get_make_items(),
+            speed=1.0,
+        ),
     )
 
+
+def setup1() -> list[Block]:
+    block = Block(
+        buildings=[
+            make(1, Bname.foresters_house),
+            make(3, Bname.woodcutters_house),
+        ],
+    )
     return [block]
 
 
@@ -403,13 +396,79 @@ def setup6() -> list[Block]:
     return [block]
 
 
+def setup7() -> list[Block]:
+    materials = Block(
+        buildings=[
+            make(2, Bname.reed_farm),
+            make(2, Bname.woodcutters_house),
+            make(2, Bname.foresters_house),
+            make(4, Bname.clay_pit),
+            make(2, Bname.brick_kiln),
+            make(4, Bname.well),
+        ],
+    )
+    food = Block(
+        buildings=[
+            make(2, Bname.tavern),
+            make(2, Bname.smokery),
+            make(2, Bname.fishers_house),
+            make(1, Bname.collectors_house),
+            make(1, Bname.berry_farm),
+            make(2, Bname.tavern),
+            make(2, Bname.bakery),
+            make(3, Bname.farm),
+            make(2, Bname.well),
+        ],
+    )
+    mines = Block(
+        buildings=[
+            make(3, Bname.coalmine),
+            make(1, Bname.rockmine),
+            make(3, Bname.ironmine),
+        ],
+    )
+    ironworks = Block(
+        buildings=[
+            make(2, Bname.furnace),
+            make(1, Bname.blacksmithy),
+            make(1, Bname.armor_smithy_small),
+        ],
+    )
+    soldiers = Block(
+        buildings=[
+            make(1, Bname.barracks),
+            make(1, Bname.sewing_room),
+            make(2, Bname.reindeer_farm),
+            make(3, Bname.farm),
+            make(3, Bname.well),
+        ],
+    )
+    wood = Block(
+        buildings=[
+            make(3, Bname.foresters_house),
+            make(5, Bname.woodcutters_house),
+        ],
+    )
+    food2 = Block(
+        buildings=[
+            make(4, Bname.tavern),
+            make(2, Bname.smokery),
+            make(2, Bname.fishers_house),
+            make(2, Bname.woodcutters_house),
+            make(2, Bname.foresters_house),
+        ],
+    )
+    return [materials, food, mines, ironworks, soldiers, wood, food2]
+
+
 def examples():
     # blocks = setup1()
     # blocks = setup2()
     # blocks = setup3()
     # blocks = setup4()
     # blocks = setup5()
-    blocks = setup6()
+    # blocks = setup6()
+    blocks = setup7()
 
     status, blocked_allocated = fixpoint(blocks)
 
