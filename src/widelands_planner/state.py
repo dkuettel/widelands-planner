@@ -13,6 +13,7 @@ from functools import cache, partial
 from pathlib import Path
 from typing import Final, final, override
 
+import line_profiler
 import numpy as np
 import torch
 from qpsolvers import (
@@ -170,6 +171,8 @@ class Vec[I]:
     ty: type[I]
     # TODO can we protect this dict from changes to be safe?
     data: dict[I, float]
+    # TODO small steps, change backing data to numpy here and make sure still same results
+    # could actually make .data a property with getters and setters for easier transition?
 
     @classmethod
     def from_zeros(cls, ty: type[I]):
@@ -1841,44 +1844,52 @@ def gen_flood_forward(
     return allocated
 
 
+@line_profiler.profile
 def flood_forward(allocated: list[Allocated]) -> list[Allocated]:
     prev_allocated = None
 
     while not have_allocations_converged(prev_allocated, allocated):
         prev_allocated = allocated
 
-        allocated = [alloc.flooded() for alloc in allocated]
-        assert all(alloc.is_make_nonnegative() for alloc in allocated)
+        # allocated = [alloc.flooded() for alloc in allocated]
+        # assert all(alloc.is_make_nonnegative() for alloc in allocated)
 
         consumption = consumption_from_allocated(allocated)
         production = full_production_from_allocated(allocated)
 
-        # TODO surplus = production.sub(consumption) -> could we vectorize or at least make it easier to understand?
+        # TODO surplus = production.sub(consumption)
+        take_totals = [alloc.take_total() for alloc in allocated]
+        demands: list[Ivec] = [izeros() for _ in allocated]
+        ratios: Ivec = izeros()
+
         for item in Item:
             surplus = production[item] - consumption[item]
             if surplus <= 0.0:
                 continue
-            demands = [
-                clipped(
-                    0.0, alloc.building.wants_ips(item) - alloc.take_total()[item], None
+            for i, (alloc, take_total) in enumerate(zips(allocated, take_totals)):
+                demands[i].data[item] = clipped(
+                    0.0,
+                    # alloc.building.wants_ips(item) - alloc.take_total()[item],
+                    # TODO wants_ips is pretty constant, almost never changes! cache in ConfiguredBuilding?
+                    alloc.building.wants_ips(item) - take_total[item],
+                    None,
                 )
-                for alloc in allocated
-            ]
-            total_demand = sum(demands)
+            total_demand = sum(d[item] for d in demands)
             if total_demand <= 0.0:
                 continue
-            ratio = clipped(0.0, surplus / total_demand, 1.0)
-            allocated = [
-                alloc.__replace__(
-                    take_local=izeros(),
-                    take_remote=alloc.take_total().add(ifrom({item: demand * ratio})),
-                )
-                for alloc, demand in zips(allocated, demands)
-            ]
-            # TODO is it necessary here, or up one level?
-            allocated = [alloc.flooded() for alloc in allocated]
+            ratios.data[item] = clipped(0.0, surplus / total_demand, 1.0)
 
-        assert all(alloc.is_make_nonnegative() for alloc in allocated)
+        allocated = [
+            alloc.__replace__(
+                take_local=izeros(),
+                take_remote=take_total.add(demand.mul(ratios)),
+            )
+            for alloc, take_total, demand in zips(allocated, take_totals, demands)
+        ]
+
+        allocated = [alloc.flooded() for alloc in allocated]
+
+        # assert all(alloc.is_make_nonnegative() for alloc in allocated)
 
         # TODO this could be computed in one go above
         # TODO hm usage for with limit for output, did we update the output?
@@ -2319,6 +2330,7 @@ def solver_state_from_blocks(blocks: list[Block]) -> list[Allocated]:
     ]
 
 
+@line_profiler.profile
 def solver_update_state(allocated: list[Allocated]) -> list[Allocated]:
     allocated = flood_forward(allocated)
     # TODO we could maybe build that into flood_forward eventually?

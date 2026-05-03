@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import time
 import pickle
 from cProfile import Profile
 from pathlib import Path
@@ -492,18 +493,23 @@ def examples():
 def bench():
     blocks = setup7()
 
-    with Profile() as p:
-        prev = None
-        state = solver_state_from_blocks(blocks)
-        while not solver_has_converged(prev, state):
-            prev, state = state, solver_update_state(state)
-        allocated = rounded_allocations(state)
-    p.dump_stats("data.prof")
+    dt = time.perf_counter_ns()
+    # with Profile() as p:
+    prev = None
+    count = 0
+    state = solver_state_from_blocks(blocks)
+    while not solver_has_converged(prev, state):
+        prev, state = state, solver_update_state(state)
+        count += 1
+    allocated = rounded_allocations(state)
+    # p.dump_stats("data.prof")
+    dt = time.perf_counter_ns() - dt
+    print(f"{count} iterations in {round(dt/1e6)}ms")
 
     gt = pickle.loads(Path("./solution.pickle").read_bytes())
     gt = [alloc for block in gt for alloc in block]
 
-    assert have_allocations_converged(gt, allocated)
+    assert have_allocations_converged(gt, allocated), "solution is off"
     print("solution is correct")
 
     # import os; os.system("uv tool run tuna data.prof")
