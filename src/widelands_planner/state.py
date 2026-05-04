@@ -1837,7 +1837,7 @@ def gen_flood_forward(
     while not have_allocations_converged(prev_allocated, allocated):
         prev_allocated = allocated
 
-        allocated = [alloc.flooded() for alloc in allocated]
+        allocated = [alloc.flooded(alloc.take_total()) for alloc in allocated]
         assert all(alloc.is_make_nonnegative() for alloc in allocated)
 
         consumption = consumption_from_allocated(allocated)
@@ -1866,7 +1866,7 @@ def gen_flood_forward(
                 for alloc, demand in zips(allocated, demands)
             ]
             # TODO is it necessary here, or up one level?
-            allocated = [alloc.flooded() for alloc in allocated]
+            allocated = [alloc.flooded(alloc.take_total()) for alloc in allocated]
 
         assert all(alloc.is_make_nonnegative() for alloc in allocated)
 

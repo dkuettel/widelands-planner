@@ -499,6 +499,7 @@ def bench():
     prev = None
     count = 0
     state = solver_state_from_blocks(blocks)
+    flooded = state
     while not solver_has_converged(prev, state):
         prev, (state, flooded) = state, solver_update_state(state)
         count += 1
