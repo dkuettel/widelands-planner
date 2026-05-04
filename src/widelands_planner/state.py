@@ -4,16 +4,23 @@ import math
 import re
 import time
 from collections import defaultdict, deque
-from collections.abc import Generator, Iterable, Iterator, Mapping, Sequence, Set
+from collections.abc import (
+    Callable,
+    Generator,
+    Iterable,
+    Iterator,
+    Mapping,
+    Sequence,
+    Set,
+)
 from cProfile import Profile
 from dataclasses import dataclass
 from datetime import datetime
 from enum import StrEnum
-from functools import cache, partial
+from functools import cache, partial, wraps
 from pathlib import Path
 from typing import Final, final, override
 
-import line_profiler
 import numpy as np
 import torch
 from qpsolvers import (
@@ -25,6 +32,18 @@ from tabulate import tabulate
 from torch import Tensor, nn
 
 zips = partial(zip, strict=True)
+
+
+def profile[**P, R](fn: Callable[P, R]) -> Callable[P, R]:
+    import line_profiler
+
+    fn = line_profiler.profile(fn)  # pyright: ignore[reportUnknownVariableType]
+
+    @wraps(fn)
+    def wrapper(*args: P.args, **kwargs: P.kwargs) -> R:
+        return fn(*args, **kwargs)
+
+    return wrapper
 
 
 def str_from_usage(alloc: Allocated) -> str:
@@ -511,7 +530,7 @@ class BaseBuilding:
         )
         return make_main, make_aux
 
-    @line_profiler.profile
+    @profile
     def allocate_ips(
         self,
         takes: set[Item],
@@ -615,7 +634,7 @@ class BaseBuilding:
         assert 0 <= used <= 1.0, used
         return total_take_ips, total_make_main_ips, total_make_aux_ips, used
 
-    @line_profiler.profile
+    @profile
     def wants_ips(
         self, takes: set[Item], makes: set[Item], speed: float, item: Item
     ) -> float:
@@ -1867,7 +1886,7 @@ def gen_flood_forward(
     return allocated
 
 
-@line_profiler.profile
+@profile
 def flood_forward(allocated: list[Allocated]) -> list[Allocated]:
     prev_allocated = None
 
@@ -1930,7 +1949,7 @@ def flood_forward(allocated: list[Allocated]) -> list[Allocated]:
     return allocated
 
 
-@line_profiler.profile
+@profile
 def prefer_local(allocated: list[Allocated]) -> list[Allocated]:
     block_ids = {id(alloc.block) for alloc in allocated}
     allocated = list(allocated)
@@ -2091,7 +2110,7 @@ def gen_back_pressure(
     return allocated
 
 
-@line_profiler.profile
+@profile
 def back_pressure(allocated: list[Allocated]) -> list[Allocated]:
     block_ids = {id(alloc.block) for alloc in allocated}
     prev_allocated = None
@@ -2360,8 +2379,10 @@ def solver_state_from_blocks(blocks: list[Block]) -> list[Allocated]:
     ]
 
 
-@line_profiler.profile
-def solver_update_state(allocated: list[Allocated]) -> list[Allocated]:
+@profile
+def solver_update_state(
+    allocated: list[Allocated],
+) -> tuple[list[Allocated], list[Allocated]]:
     flooded = flood_forward(allocated)
     # TODO we could maybe build that into flood_forward eventually?
     allocated = prefer_local(flooded)
