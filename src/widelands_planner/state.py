@@ -203,6 +203,8 @@ class Vec[I]:
         return cls(ty, {i: sum(r[i] for r in rates) for i in items})
 
     def low_clipped(self, low: float) -> Vec[I]:
+        if low == 0.0:
+            return Vec(self.ty, {i: v for (i, v) in self.data.items() if v > 0.0})
         # TODO well again, what do do with unset values, if they are 0.0, they should also be changed
         return Vec(self.ty, {i: max(low, v) for (i, v) in self.data.items()})
 
@@ -602,14 +604,13 @@ class BaseBuilding:
             # TODO doesnt this break used_limit_ratio and used_allocation_ratio in some cases?
             old_used, used = used, min(used + ratio, 1.0)
             ratio = used - old_used
+            # TODO i think here and limit below are expensive because with inf and min(0, ...) they become dense, np here should help?
             allocation = allocation.sub(take_ips.smul(ratio))
             allocation = allocation.low_clipped(0.0)
             if allocation_item is not None and used_allocation_ratio:
                 allocation.data[allocation_item] = 0.0
             assert all(v >= 0.0 for v in allocation.data.values()), allocation
-            limit = limit.sub(
-                make_main_ips.smul(ratio)
-            )  # TODO i think not, right? .sub(make_aux_ips.smul(ratio))
+            limit = limit.sub(make_main_ips.smul(ratio))
             limit = limit.low_clipped(0.0)
             if limit_item is not None and used_limit_ratio:
                 limit.data[limit_item] = 0.0
@@ -2187,6 +2188,7 @@ def back_pressure(allocated: list[Allocated]) -> list[Allocated]:
         allocated = [
             back_reallocated(
                 alloc,
+                # TODO call and totals here is heaviest now
                 alloc.building.back_pressure(
                     alloc.take_total(), alloc.make_full_total()
                 ),
