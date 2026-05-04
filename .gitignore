@@ -1,6 +1,9 @@
 /.nd/
 /Session.vim
+/data.prof
+/profile_*
 /profiles/
 /result
+/solution.pickle
 /state.json
 __pycache__/
