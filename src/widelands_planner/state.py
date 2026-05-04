@@ -1953,6 +1953,9 @@ def flood_forward(allocated: list[Allocated]) -> list[Allocated]:
 def prefer_local(allocated: list[Allocated]) -> list[Allocated]:
     block_ids = {id(alloc.block) for alloc in allocated}
     allocated = list(allocated)
+    total_takes = [alloc.take_total() for alloc in allocated]
+    total_makes_main = [alloc.make_main_total() for alloc in allocated]
+    total_makes_aux = [alloc.make_aux_total() for alloc in allocated]
     for block_id in block_ids:
         block_allocated_ids = [
             i for (i, alloc) in enumerate(allocated) if id(alloc.block) == block_id
@@ -1972,10 +1975,9 @@ def prefer_local(allocated: list[Allocated]) -> list[Allocated]:
             else:
                 ratio_make = 0.0
             for i in block_allocated_ids:
-                # TODO these 3 are again very expensive
-                total_take = allocated[i].take_total()
-                total_make_main = allocated[i].make_main_total()
-                total_make_aux = allocated[i].make_aux_total()
+                total_take = total_takes[i]
+                total_make_main = total_makes_main[i]
+                total_make_aux = total_makes_aux[i]
                 allocated[i] = allocated[i].__replace__(
                     take_remote=allocated[i].take_remote.updated(
                         {item: (1.0 - ratio_take) * total_take[item]}
