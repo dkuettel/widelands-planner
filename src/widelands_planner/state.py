@@ -349,6 +349,11 @@ class Crafting:
         return speed * short + (1 - speed) * long
 
 
+cached_wants_ips: dict[tuple[Bname, frozenset[Item], frozenset[Item], Item], float] = (
+    dict()
+)
+
+
 @dataclass(frozen=True)
 class BaseBuilding:
     name: Bname
@@ -486,8 +491,7 @@ class BaseBuilding:
         make_main: Ivec = izeros()
         make_aux: Ivec = izeros()
         for crafting in craftings:
-            short, long = crafting.seconds_range
-            dt += speed * short + (1 - speed) * long
+            dt += crafting.seconds(speed)
             take = take.add(crafting.take)
             make_main = make_main.add(crafting.make_main)
             make_aux = make_aux.add(crafting.make_aux)
@@ -507,6 +511,7 @@ class BaseBuilding:
         )
         return make_main, make_aux
 
+    @line_profiler.profile
     def allocate_ips(
         self,
         takes: set[Item],
@@ -610,10 +615,24 @@ class BaseBuilding:
         assert 0 <= used <= 1.0, used
         return total_take_ips, total_make_main_ips, total_make_aux_ips, used
 
+    @line_profiler.profile
     def wants_ips(
         self, takes: set[Item], makes: set[Item], speed: float, item: Item
     ) -> float:
+        assert speed == 1.0
+        match cached_wants_ips.get(
+            (self.name, frozenset(takes), frozenset(makes), item), None
+        ):
+            case (float() | int()) as ips:
+                # TODO I get almost no cache hits, how can that be?
+                # ah no we do now, there was one early return ...
+                # just goes to show that layering is better, should have decorated
+                # or just write two functions, with a real and a _real, easier to split
+                return ips
+            case None:
+                pass
         # TODO would it converge faster/better if we based it on the previous feasible allocation?
+        # TODO this is the most expensive thing here, also might be cached ...
         levels: list[list[Crafting]] = self.get_enabled_crafting_levels(takes, makes)
         craftings: list[Crafting] = [crafting for level in levels for crafting in level]
         craftings = [crafting for crafting in craftings if crafting.take[item] > 0.0]
@@ -654,13 +673,16 @@ class BaseBuilding:
                     enabled,
                 )
         if not any(enabled):
+            cached_wants_ips[self.name, frozenset(takes), frozenset(makes), item] = 0.0
             return 0.0
         enabled_craftings = [
             crafting for (enabled, crafting) in zips(enabled, craftings) if enabled
         ]
-        return sum(crafting.take[item] for crafting in enabled_craftings) / (
+        ips = sum(crafting.take[item] for crafting in enabled_craftings) / (
             sum(crafting.seconds(speed) for crafting in enabled_craftings) + self.pause
         )
+        cached_wants_ips[self.name, frozenset(takes), frozenset(makes), item] = ips
+        return ips
 
     def limit_waste(
         self, takes: set[Item], makes: set[Item], speed: float, allocation: Ivec
@@ -758,6 +780,7 @@ class ConfiguredGenericBuilding:
             self.takes, self.makes, self.speed, allocation
         )
 
+    # TODO instead we could precompute here and have it as a field?
     def wants_ips(self, item: Item) -> float:
         return self.building.wants_ips(self.takes, self.makes, self.speed, item)
 
@@ -1887,24 +1910,27 @@ def flood_forward(allocated: list[Allocated]) -> list[Allocated]:
             for alloc, take_total, demand in zips(allocated, take_totals, demands)
         ]
 
-        allocated = [alloc.flooded() for alloc in allocated]
+        allocated = [alloc.flooded(alloc.take_remote) for alloc in allocated]
 
         # assert all(alloc.is_make_nonnegative() for alloc in allocated)
 
         # TODO this could be computed in one go above
         # TODO hm usage for with limit for output, did we update the output?
-        allocated = [
-            alloc.__replace__(
-                flood_usage=alloc.building.usage_for(
-                    alloc.take_total(), alloc.make_full_total()
-                )
-            )
-            for alloc in allocated
-        ]
+        # allocated = [
+        #     alloc.__replace__(
+        #         # TODO we actually only need that for the last iteration ... and its expensive
+        #         # or we compute it only on demand based on the solution
+        #         # flood_usage=alloc.building.usage_for(
+        #         #     alloc.take_remote, alloc.make_full_total()
+        #         # )
+        #     )
+        #     for alloc in allocated
+        # ]
 
     return allocated
 
 
+@line_profiler.profile
 def prefer_local(allocated: list[Allocated]) -> list[Allocated]:
     block_ids = {id(alloc.block) for alloc in allocated}
     allocated = list(allocated)
@@ -1927,6 +1953,7 @@ def prefer_local(allocated: list[Allocated]) -> list[Allocated]:
             else:
                 ratio_make = 0.0
             for i in block_allocated_ids:
+                # TODO these 3 are again very expensive
                 total_take = allocated[i].take_total()
                 total_make_main = allocated[i].make_main_total()
                 total_make_aux = allocated[i].make_aux_total()
@@ -2064,6 +2091,7 @@ def gen_back_pressure(
     return allocated
 
 
+@line_profiler.profile
 def back_pressure(allocated: list[Allocated]) -> list[Allocated]:
     block_ids = {id(alloc.block) for alloc in allocated}
     prev_allocated = None
@@ -2148,9 +2176,10 @@ def back_pressure(allocated: list[Allocated]) -> list[Allocated]:
         # TODO this could be computed in one go above
         allocated = [
             alloc.__replace__(
-                stable_usage=alloc.building.usage_for(
-                    alloc.take_total(), alloc.make_full_total()
-                ),
+                # TODO again not very cheap, and only needed for the final solution
+                # stable_usage=alloc.building.usage_for(
+                #     alloc.take_total(), alloc.make_full_total()
+                # ),
                 # TODO leaf items is a global thing anyway, we could have it as state and decide then and there
                 is_infinite=alloc.building.building.makes <= leaf_items,
             )
@@ -2240,8 +2269,9 @@ class Allocated:
     def make_aux_total(self) -> Ivec:
         return isum([self.make_aux_local, self.make_aux_remote])
 
-    def flooded(self) -> Allocated:
-        main, aux = self.building.produces_ips(self.take_total())
+    def flooded(self, take_total: Ivec) -> Allocated:
+        # main, aux = self.building.produces_ips(self.take_total())
+        main, aux = self.building.produces_ips(take_total)
         return self.__replace__(
             make_main_local=izeros(),
             make_aux_local=izeros(),
@@ -2332,11 +2362,11 @@ def solver_state_from_blocks(blocks: list[Block]) -> list[Allocated]:
 
 @line_profiler.profile
 def solver_update_state(allocated: list[Allocated]) -> list[Allocated]:
-    allocated = flood_forward(allocated)
+    flooded = flood_forward(allocated)
     # TODO we could maybe build that into flood_forward eventually?
-    allocated = prefer_local(allocated)
+    allocated = prefer_local(flooded)
     allocated = back_pressure(allocated)
-    return allocated
+    return allocated, flooded
 
 
 def solver_has_converged(

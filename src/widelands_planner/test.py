@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-import time
 import pickle
+import time
 from cProfile import Profile
 from pathlib import Path
 
@@ -20,6 +20,7 @@ from widelands_planner.state import (
     solver_has_converged,
     solver_state_from_blocks,
     solver_update_state,
+    zips,
 )
 
 
@@ -499,12 +500,23 @@ def bench():
     count = 0
     state = solver_state_from_blocks(blocks)
     while not solver_has_converged(prev, state):
-        prev, state = state, solver_update_state(state)
+        prev, (state, flooded) = state, solver_update_state(state)
         count += 1
+    state = [
+        alloc.__replace__(
+            flood_usage=alloc.building.usage_for(
+                flood.take_remote, flood.make_full_total()
+            ),
+            stable_usage=alloc.building.usage_for(
+                alloc.take_total(), alloc.make_full_total()
+            ),
+        )
+        for alloc, flood in zips(state, flooded)
+    ]
     allocated = rounded_allocations(state)
     # p.dump_stats("data.prof")
     dt = time.perf_counter_ns() - dt
-    print(f"{count} iterations in {round(dt/1e6)}ms")
+    print(f"{count} iterations in {round(dt / 1e6)}ms")
 
     gt = pickle.loads(Path("./solution.pickle").read_bytes())
     gt = [alloc for block in gt for alloc in block]
