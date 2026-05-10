@@ -14,7 +14,7 @@ from collections.abc import (
     Set,
 )
 from cProfile import Profile
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime
 from enum import StrEnum
 from functools import cache, partial, wraps
@@ -1092,6 +1092,8 @@ type ConfiguredBuilding = ConfiguredGenericBuilding
 class BuildingCount:
     count: int
     building: ConfiguredBuilding
+    # TODO using this to cheat a bit, as cache, but this doesnt really make Self immutable now
+    wants: dict[Item, float] = field(default_factory=dict)
 
     def __post_init__(self):
         assert self.count >= 0
@@ -1113,7 +1115,13 @@ class BuildingCount:
         return main.smul(self.count), aux.smul(self.count)
 
     def wants_ips(self, item: Item) -> float:
-        return self.building.wants_ips(item) * self.count
+        match self.wants.get(item, None):
+            case None:
+                w = self.building.wants_ips(item) * self.count
+                self.wants[item] = w
+                return w
+            case (float() | int()) as w:
+                return w
 
     def limit_waste(self, allocation: Ivec) -> Ivec:
         if self.count == 0:
