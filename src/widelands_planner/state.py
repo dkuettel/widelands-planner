@@ -748,8 +748,8 @@ class BaseBuilding:
             [
                 crafting
                 for crafting in level
-                if crafting.take.nonzero_items() <= np_nonzero_items(np_allocation)
-                and not (crafting.make_main.nonzero_items() & np_zero_items(np_limit))
+                if np.all((crafting.np.take == 0.0) | (np_allocation > 0.0))
+                and np.all((crafting.np.make_main == 0.0) | (np_limit > 0.0))
             ]
             for level in crafting_levels
         ]
@@ -821,23 +821,12 @@ class BaseBuilding:
             np_total_make_aux_ips += np_make_aux_ips * np_ratio
 
             # TODO repeated with code at the beginning
-            allocation_nonzero_items = {
-                item for (index, item) in enumerate(Item) if np_allocation[index] > 0.0
-            }
-            limit_zero_items = {
-                item for (index, item) in enumerate(Item) if np_limit[index] == 0.0
-            }
             crafting_levels = [
                 [
                     crafting
                     for crafting in level
-                    # if crafting.take.nonzero_items() <= allocation.nonzero_items()
-                    if crafting.take.nonzero_items() <= allocation_nonzero_items
-                    and not (
-                        crafting.make_main.nonzero_items()
-                        # & {i for i, v in limit.data.items() if v == 0.0}
-                        & limit_zero_items
-                    )
+                    if np.all((crafting.np.take == 0.0) | (np_allocation > 0.0))
+                    and np.all((crafting.np.make_main == 0.0) | (np_limit > 0.0))
                 ]
                 for level in crafting_levels
             ]
