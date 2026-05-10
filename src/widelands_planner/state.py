@@ -376,7 +376,15 @@ class TakeMake:
         return cls(izeros(), izeros())
 
 
-@dataclass(frozen=True)
+@dataclass
+class NpCrafting:
+    take: farray
+    make_main: farray
+    make_aux: farray
+
+
+# @dataclass(frozen=True)
+@dataclass
 class Crafting:
     take: Ivec
     # experiences back-pressure (meaning "produce only when economy needs")
@@ -385,8 +393,15 @@ class Crafting:
     make_aux: Ivec
     seconds_range: tuple[float, float]  # (short, long)
 
+    np: NpCrafting = field(init=False)
+
     def __post_init__(self):
         assert self.seconds_range[0] <= self.seconds_range[1]
+        self.np = NpCrafting(
+            take=np_from_ivec(self.take),
+            make_main=np_from_ivec(self.make_main),
+            make_aux=np_from_ivec(self.make_aux),
+        )
 
     def seconds(self, speed: float) -> float:
         assert 0 <= speed <= 1, speed
@@ -543,6 +558,19 @@ class BaseBuilding:
         dt += self.pause
         assert dt > 0
         return take.sdiv(dt), make_main.sdiv(dt), make_aux.sdiv(dt)
+
+    @profile
+    def np_take_make_ips_from_craftings(
+        self, craftings: Sequence[Crafting], speed: float
+    ) -> tuple[farray, farray, farray]:
+        if len(craftings) == 0:
+            return np_zeros(), np_zeros(), np_zeros()
+        take = np.sum([c.np.take for c in craftings], axis=0)
+        make_main = np.sum([c.np.make_main for c in craftings], axis=0)
+        make_aux = np.sum([c.np.make_aux for c in craftings], axis=0)
+        dt = sum(c.seconds(speed) for c in craftings) + self.pause
+        assert dt > 0
+        return take / dt, make_main / dt, make_aux / dt
 
     def produces_ips(
         self,
@@ -712,7 +740,6 @@ class BaseBuilding:
         np_allocation: farray,
         np_limit: farray,
     ) -> tuple[farray, farray, farray, float]:
-        # assert all(v >= 0.0 for v in limit.data.values()), limit
         # TODO actually we can only control the takes, not the makes, right?
         crafting_levels: list[list[Crafting]] = self.get_enabled_crafting_levels(
             takes, makes
@@ -727,30 +754,14 @@ class BaseBuilding:
             for level in crafting_levels
         ]
         crafting_levels = [level for level in crafting_levels if len(level) > 0]
-        # total_take_ips = izeros()
         np_total_take_ips = np_zeros()
-        # total_make_main_ips = izeros()
         np_total_make_main_ips = np_zeros()
-        # total_make_aux_ips = izeros()
         np_total_make_aux_ips = np_zeros()
         used = 0.0
         while used < 1.0 and len(crafting_levels) > 0:
-            take_ips, make_main_ips, make_aux_ips = self.take_make_ips_from_craftings(
-                crafting_levels[0], speed
+            np_take_ips, np_make_main_ips, np_make_aux_ips = (
+                self.np_take_make_ips_from_craftings(crafting_levels[0], speed)
             )
-
-            np_take_ips = np_from_ivec(take_ips)
-            np_make_main_ips = np_from_ivec(make_main_ips)
-            np_make_aux_ips = np_from_ivec(make_aux_ips)
-
-            # allocation_constraints = (
-            #     (item, allocation[item] / ips)
-            #     for item, ips in take_ips.data.items()
-            #     if ips > 0.0
-            # )
-            # allocation_item, allocation_ratio = min(
-            #     allocation_constraints, key=lambda x: x[1], default=(None, 1.0)
-            # )
 
             np_allocation_ratios = np.divide(
                 np_allocation,
@@ -767,15 +778,6 @@ class BaseBuilding:
                 assert np.isfinite(np_allocation_ratio)
                 np_allocation_item = list(Item)[np_allocation_index]
 
-            # limit_constraints = (
-            #     (item, limit[item] / ips)
-            #     for item, ips in make_main_ips.data.items()
-            #     if ips > 0.0 and item in limit.data
-            # )
-            # limit_item, limit_ratio = min(
-            #     limit_constraints, key=lambda x: x[1], default=(None, 1.0)
-            # )
-
             np_limit_ratios = np.divide(
                 np_limit,
                 np_make_main_ips,
@@ -790,18 +792,11 @@ class BaseBuilding:
                 np_limit_ratio = 1.0
                 np_limit_item = None
 
-            # ratio = min(allocation_ratio, limit_ratio)
             np_ratio = min(np_allocation_ratio, np_limit_ratio)
 
             # TODO will it work when they are both true? or is there a problem when they should be both true but eps makes only one true?
             used_allocation_ratio = np_ratio == np_allocation_ratio
             used_limit_ratio = np_ratio == np_limit_ratio
-            # assert 0 <= ratio, (
-            #     allocation_item,
-            #     allocation_ratio,
-            #     limit_item,
-            #     limit_ratio,
-            # )
 
             # TODO doesnt this break used_limit_ratio and used_allocation_ratio in some cases?
             old_used, used = used, min(used + np_ratio, 1.0)
@@ -817,18 +812,10 @@ class BaseBuilding:
             if np_allocation_item is not None and used_allocation_ratio:
                 np_allocation[np_allocation_index] = 0.0
 
-            # limit = limit.sub(make_main_ips.smul(ratio))
-            # limit = limit.low_clipped(0.0)
-            # if limit_item is not None and used_limit_ratio:
-            #     limit.data[limit_item] = 0.0
-            # assert all(v >= 0.0 for v in limit.data.values()), limit
             np_limit = (np_limit - np_make_main_ips * np_ratio).clip(0.0, None)
             if np_limit_item is not None and used_limit_ratio:
                 np_limit[np_limit_index] = 0.0
 
-            # total_take_ips = total_take_ips.add(take_ips.smul(ratio))
-            # total_make_main_ips = total_make_main_ips.add(make_main_ips.smul(ratio))
-            # total_make_aux_ips = total_make_aux_ips.add(make_aux_ips.smul(ratio))
             np_total_take_ips += np_take_ips * np_ratio
             np_total_make_main_ips += np_make_main_ips * np_ratio
             np_total_make_aux_ips += np_make_aux_ips * np_ratio
@@ -856,7 +843,7 @@ class BaseBuilding:
             ]
             crafting_levels = [level for level in crafting_levels if len(level) > 0]
         assert 0 <= used <= 1.0, used
-        # return total_take_ips, total_make_main_ips, total_make_aux_ips, used
+
         return (
             np_total_take_ips,
             np_total_make_main_ips,
