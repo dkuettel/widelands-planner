@@ -33,6 +33,8 @@ from torch import Tensor, nn
 
 zips = partial(zip, strict=True)
 
+type farray = np.typing.NDArray[np.floating]
+
 
 def profile[**P, R](fn: Callable[P, R]) -> Callable[P, R]:
     import line_profiler
@@ -156,6 +158,14 @@ def ivec_from_np(a: np.typing.NDArray[np.floating]) -> Ivec:
     return ifrom(
         {item: a[index].item() for (index, item) in enumerate(Item) if a[index] != 0.0}
     )
+
+
+def np_nonzero_items(vec: farray) -> set[Item]:
+    return {i for (v, i) in zips(vec, Item) if v > 0.0}
+
+
+def np_zero_items(vec: farray) -> set[Item]:
+    return {i for (v, i) in zips(vec, Item) if v == 0.0}
 
 
 def np_zeros() -> np.typing.NDArray[np.floating]:
@@ -673,8 +683,6 @@ class BaseBuilding:
         allocation: Ivec,
         limit: Ivec | None = None,
     ) -> tuple[Ivec, Ivec, Ivec, float]:
-        # NOTE the limit only affects output that experiences back-pressure, therefore, the final allocated output could be more than the limit
-        # NOTE limit is interpreted as limit only when value set unset values are "inf"
         np_allocation = np_from_ivec(allocation)
         if limit is None:
             limit = ifrom({i: math.inf for i in Item})
@@ -683,6 +691,27 @@ class BaseBuilding:
                 {i: (limit[i] if i in limit.data else math.inf) for i in Item}
             )
         np_limit = np_from_ivec(limit)
+
+        np_total_take_ips, np_total_make_main_ips, np_total_make_aux_ips, used = (
+            self.np_allocate_ips_new(takes, makes, speed, np_allocation, np_limit)
+        )
+
+        return (
+            ivec_from_np(np_total_take_ips),
+            ivec_from_np(np_total_make_main_ips),
+            ivec_from_np(np_total_make_aux_ips),
+            used,
+        )
+
+    @profile
+    def np_allocate_ips_new(
+        self,
+        takes: set[Item],
+        makes: set[Item],
+        speed: float,
+        np_allocation: farray,
+        np_limit: farray,
+    ) -> tuple[farray, farray, farray, float]:
         # assert all(v >= 0.0 for v in limit.data.values()), limit
         # TODO actually we can only control the takes, not the makes, right?
         crafting_levels: list[list[Crafting]] = self.get_enabled_crafting_levels(
@@ -692,11 +721,8 @@ class BaseBuilding:
             [
                 crafting
                 for crafting in level
-                if crafting.take.nonzero_items() <= allocation.nonzero_items()
-                and not (
-                    crafting.make_main.nonzero_items()
-                    & {i for i, v in limit.data.items() if v == 0.0}
-                )
+                if crafting.take.nonzero_items() <= np_nonzero_items(np_allocation)
+                and not (crafting.make_main.nonzero_items() & np_zero_items(np_limit))
             ]
             for level in crafting_levels
         ]
@@ -832,9 +858,9 @@ class BaseBuilding:
         assert 0 <= used <= 1.0, used
         # return total_take_ips, total_make_main_ips, total_make_aux_ips, used
         return (
-            ivec_from_np(np_total_take_ips),
-            ivec_from_np(np_total_make_main_ips),
-            ivec_from_np(np_total_make_aux_ips),
+            np_total_take_ips,
+            np_total_make_main_ips,
+            np_total_make_aux_ips,
             used,
         )
 
@@ -928,6 +954,19 @@ class BaseBuilding:
         )
         return take
 
+    def np_back_pressure(
+        self,
+        takes: set[Item],
+        makes: set[Item],
+        speed: float,
+        allocation: farray,
+        limit: farray,
+    ):
+        take, _make_main, _make_aux, _used = self.np_allocate_ips_new(
+            takes, makes, speed, allocation, limit
+        )
+        return take
+
     def usage_for(
         self,
         allocation: Ivec,
@@ -1015,6 +1054,11 @@ class ConfiguredGenericBuilding:
             self.takes, self.makes, self.speed, allocation, limit
         )
 
+    def np_back_pressure(self, allocation: farray, limit: farray) -> farray:
+        return self.building.np_back_pressure(
+            self.takes, self.makes, self.speed, allocation, limit
+        )
+
     def usage_for(self, allocation: Ivec, limit: Ivec) -> float:
         return self.building.usage_for(
             allocation, limit, self.takes, self.makes, self.speed
@@ -1083,6 +1127,14 @@ class BuildingCount:
             allocation.sdiv(self.count),
             limit.sdiv(self.count),
         ).smul(self.count)
+
+    def np_back_pressure(self, allocation: farray, limit: farray) -> farray:
+        if self.count == 0:
+            return np_zeros()
+        return (
+            self.building.np_back_pressure(allocation / self.count, limit / self.count)
+            * self.count
+        )
 
     def takes_ips(self, take: Ivec | None = None, make: Ivec | None = None) -> Ivec:
         return self.building.takes_ips(take, make).smul(self.count)
@@ -2216,6 +2268,16 @@ def back_reallocated(alloc: Allocated, limit: Ivec) -> Allocated:
     )
 
 
+def np_back_reallocated(
+    remote_consumption: np.typing.NDArray[np.floating],
+    local_consumption: np.typing.NDArray[np.floating],
+    limit: np.typing.NDArray[np.floating],
+) -> tuple[np.typing.NDArray[np.floating], np.typing.NDArray[np.floating]]:
+    local_consumption = np.minimum(local_consumption, limit)
+    remote_consumption = limit - local_consumption
+    return remote_consumption, local_consumption
+
+
 def gen_back_pressure(
     allocated: list[Allocated],
 ) -> Generator[list[Allocated], None, list[Allocated]]:
@@ -2317,6 +2379,103 @@ def gen_back_pressure(
 
 
 @profile
+def np_back_pressure(allocated: list[Allocated]) -> list[Allocated]:
+    block_ids = {id(alloc.block) for alloc in allocated}
+    by_block_id = {id: i + 1 for (i, id) in enumerate(block_ids)}
+
+    B: Final = len(block_ids)
+    N: Final = len(allocated)
+    I: Final = len(Item)
+
+    last_production_main = None
+    last_production_aux = None
+    production_main = np.zeros([1 + B, N, I])
+    production_aux = np.zeros([1 + B, N, I])
+
+    last_consumption = None
+    consumption = np.zeros([1 + B, N, I])
+
+    for i, alloc in enumerate(allocated):
+        k = by_block_id[id(alloc.block)]
+        production_main[0, i, :] = np_from_ivec(alloc.make_main_remote)
+        production_main[k, i, :] = np_from_ivec(alloc.make_main_local)
+        production_aux[0, i, :] = np_from_ivec(alloc.make_aux_remote)
+        production_aux[k, i, :] = np_from_ivec(alloc.make_aux_local)
+        consumption[0, i, :] = np_from_ivec(alloc.take_remote)
+        consumption[k, i, :] = np_from_ivec(alloc.take_local)
+
+    # TODO ok to do it only once, correct i think, but not the same as the old version
+    leaf_items = set(Item) - {
+        item for alloc in allocated for item in alloc.take_total().nonzero_items()
+    }
+    leaves = np_from_ivec(ifrom({i: 1.0 for i in leaf_items})) > 0
+
+    while (
+        last_production_main is None
+        or last_production_aux is None
+        or last_consumption is None
+        or (
+            np.any(np.abs(last_production_main - production_main) > ips_eps)
+            or np.any(np.abs(last_production_aux - production_aux) > ips_eps)
+            or np.any(np.abs(last_consumption - consumption) > ips_eps)
+        )
+    ):
+        last_production_main = production_main
+        last_production_aux = production_aux
+        last_consumption = consumption
+
+        total_production_main = np.sum(production_main, axis=1)
+        total_production_aux = np.sum(production_aux, axis=1)
+        total_consumption = np.sum(consumption, axis=1)
+        keep_ratio = np.divide(
+            total_consumption - total_production_aux,
+            total_production_main,
+            where=total_production_main > 0.0,
+            out=np.ones_like(total_production_main),
+        )
+        keep_ratio = keep_ratio.clip(0.0, 1.0)
+        # TODO precompute? or better way for broadcasting?
+        keep_ratio[np.broadcast_to(leaves[None, :], keep_ratio.shape)] = 1.0
+
+        production_main = production_main * keep_ratio[:, None, :]
+
+        for i, alloc in enumerate(allocated):
+            new_consumption = alloc.building.np_back_pressure(
+                np.sum(consumption[:, i, :], axis=0),
+                np.sum(production_main[:, i, :], axis=0)
+                + np.sum(production_aux[:, i, :], axis=0),
+            )
+            k = by_block_id[id(alloc.block)]
+            new_remote, new_local = np_back_reallocated(
+                consumption[0, i, :],
+                consumption[k, i, :],
+                new_consumption,
+            )
+            consumption[0, i, :] = new_remote
+            consumption[k, i, :] = new_local
+
+    allocated = [
+        alloc.__replace__(
+            take_local=ivec_from_np(consumption[by_block_id[id(alloc.block)], i, :]),
+            take_remote=ivec_from_np(consumption[0, i, :]),
+            make_main_local=ivec_from_np(
+                production_main[by_block_id[id(alloc.block)], i, :]
+            ),
+            make_main_remote=ivec_from_np(production_main[0, i, :]),
+            # TODO mhh does aux even change?
+            make_aux_local=ivec_from_np(
+                production_aux[by_block_id[id(alloc.block)], i, :]
+            ),
+            make_aux_remote=ivec_from_np(production_aux[0, i, :]),
+            is_infinite=alloc.building.building.makes <= leaf_items,
+        )
+        for i, alloc in enumerate(allocated)
+    ]
+
+    return allocated
+
+
+@profile
 def back_pressure(allocated: list[Allocated]) -> list[Allocated]:
     block_ids = {id(alloc.block) for alloc in allocated}
     prev_allocated = None
@@ -2400,6 +2559,7 @@ def back_pressure(allocated: list[Allocated]) -> list[Allocated]:
         ]
 
         # TODO this could be computed in one go above
+        # TODO an also it could be done only at the end of this, and even at the end of everything outside
         allocated = [
             alloc.__replace__(
                 # TODO again not very cheap, and only needed for the final solution
@@ -2593,7 +2753,8 @@ def solver_update_state(
     flooded = flood_forward(allocated)
     # TODO we could maybe build that into flood_forward eventually?
     allocated = prefer_local(flooded)
-    allocated = back_pressure(allocated)
+    # allocated = back_pressure(allocated)
+    allocated = np_back_pressure(allocated)
     return allocated, flooded
 
 
