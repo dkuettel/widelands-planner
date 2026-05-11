@@ -2224,9 +2224,6 @@ def flood_forward(allocated: list[Allocated]) -> list[Allocated]:
 
 @profile
 def np_flood_forward(allocated: list[Allocated]) -> list[Allocated]:
-    # N: Final = len(allocated)
-    # I: Final = len(Item)
-
     last_consumption = None
     consumption = np.stack([np_from_ivec(alloc.take_total()) for alloc in allocated])
     last_production = None
@@ -2264,22 +2261,8 @@ def np_flood_forward(allocated: list[Allocated]) -> list[Allocated]:
 
         consumption = consumption + demands * ratios[None, :]
 
-        # TODO this will happen at the end only, or never once we are fully np
-        allocated = [
-            alloc.__replace__(
-                take_local=izeros(),
-                take_remote=ivec_from_np(consumption[i, :]),
-            )
-            for i, alloc in enumerate(allocated)
-        ]
-
-        allocated = [
-            alloc.np_flooded(consumption[i, :]) for i, alloc in enumerate(allocated)
-        ]
-
-        # TODO gone once full np
         production = np.stack(
-            [np_from_ivec(alloc.make_full_total()) for alloc in allocated]
+            [alloc.np_flooded(consumption[i, :]) for i, alloc in enumerate(allocated)]
         )
 
         # TODO this could be computed in one go above
@@ -2294,6 +2277,20 @@ def np_flood_forward(allocated: list[Allocated]) -> list[Allocated]:
         #     )
         #     for alloc in allocated
         # ]
+
+    allocated = [
+        alloc.__replace__(
+            take_local=izeros(),
+            take_remote=ivec_from_np(consumption[i, :]),
+            # make_main_local=izeros(),
+            # make_aux_local=izeros(),
+            # make_main_remote=main,
+            # make_aux_remote=aux,
+        )
+        for i, alloc in enumerate(allocated)
+    ]
+
+    allocated = [alloc.flooded(alloc.take_total()) for alloc in allocated]
 
     return allocated
 
@@ -2758,15 +2755,9 @@ class Allocated:
             make_aux_remote=aux,
         )
 
-    def np_flooded(self, take_total: farray) -> Allocated:
-        # TODO eventually we dont need the ivec here anymore
+    def np_flooded(self, take_total: farray) -> farray:
         main, aux = self.building.np_produces_ips(take_total)
-        return self.__replace__(
-            make_main_local=izeros(),
-            make_aux_local=izeros(),
-            make_main_remote=ivec_from_np(main),
-            make_aux_remote=ivec_from_np(aux),
-        )
+        return main + aux
 
     def is_make_nonnegative(self) -> bool:
         total = self.make_full_total()
