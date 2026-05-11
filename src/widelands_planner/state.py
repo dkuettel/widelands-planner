@@ -591,6 +591,19 @@ class BaseBuilding:
         )
         return make_main, make_aux
 
+    def np_produces_ips(
+        self,
+        takes: set[Item],
+        makes: set[Item],
+        speed: float,
+        allocation: farray,
+    ) -> tuple[farray, farray]:
+        np_limit = np_from_ivec(ifrom({i: math.inf for i in Item}))
+        _np_total_take_ips, np_total_make_main_ips, np_total_make_aux_ips, _used = (
+            self.np_allocate_ips_new_np(takes, makes, speed, allocation, np_limit)
+        )
+        return np_total_make_main_ips, np_total_make_aux_ips
+
     def allocate_ips(
         self,
         takes: set[Item],
@@ -1026,6 +1039,11 @@ class ConfiguredGenericBuilding:
             self.takes, self.makes, self.speed, allocation
         )
 
+    def np_produces_ips(self, allocation: farray) -> tuple[farray, farray]:
+        return self.building.np_produces_ips(
+            self.takes, self.makes, self.speed, allocation
+        )
+
     # TODO instead we could precompute here and have it as a field?
     def wants_ips(self, item: Item) -> float:
         return self.building.wants_ips(self.takes, self.makes, self.speed, item)
@@ -1097,6 +1115,12 @@ class BuildingCount:
             return izeros(), izeros()
         main, aux = self.building.produces_ips(allocation.sdiv(self.count))
         return main.smul(self.count), aux.smul(self.count)
+
+    def np_produces_ips(self, allocation: farray) -> tuple[farray, farray]:
+        if self.count == 0:
+            return np_zeros(), np_zeros()
+        main, aux = self.building.np_produces_ips(allocation / self.count)
+        return main * self.count, aux * self.count
 
     def wants_ips(self, item: Item) -> float:
         match self.wants.get(item, None):
@@ -2199,6 +2223,82 @@ def flood_forward(allocated: list[Allocated]) -> list[Allocated]:
 
 
 @profile
+def np_flood_forward(allocated: list[Allocated]) -> list[Allocated]:
+    # N: Final = len(allocated)
+    # I: Final = len(Item)
+
+    last_consumption = None
+    consumption = np.stack([np_from_ivec(alloc.take_total()) for alloc in allocated])
+    last_production = None
+    production = np.stack(
+        [np_from_ivec(alloc.make_full_total()) for alloc in allocated]
+    )
+
+    wants = np.array(
+        [[alloc.building.wants_ips(item) for item in Item] for alloc in allocated]
+    )
+
+    while (
+        last_consumption is None
+        or last_production is None
+        or (
+            np.any(np.abs(last_consumption - consumption) > ips_eps)
+            or np.any(np.abs(last_production - production) > ips_eps)
+        )
+    ):
+        last_consumption = consumption
+        last_production = production
+
+        total_consumption = np.sum(consumption, axis=0)
+        total_production = np.sum(production, axis=0)
+
+        surplus = (total_production - total_consumption).clip(0.0, None)
+        demands = (wants - consumption).clip(0.0, None)
+        total_demands = np.sum(demands, axis=0)
+        ratios = np.divide(
+            surplus,
+            total_demands,
+            where=total_demands > 0.0,
+            out=np.full_like(total_demands, 0.0),
+        ).clip(0.0, 1.0)
+
+        consumption = consumption + demands * ratios[None, :]
+
+        # TODO this will happen at the end only, or never once we are fully np
+        allocated = [
+            alloc.__replace__(
+                take_local=izeros(),
+                take_remote=ivec_from_np(consumption[i, :]),
+            )
+            for i, alloc in enumerate(allocated)
+        ]
+
+        allocated = [
+            alloc.np_flooded(consumption[i, :]) for i, alloc in enumerate(allocated)
+        ]
+
+        # TODO gone once full np
+        production = np.stack(
+            [np_from_ivec(alloc.make_full_total()) for alloc in allocated]
+        )
+
+        # TODO this could be computed in one go above
+        # TODO hm usage for with limit for output, did we update the output?
+        # allocated = [
+        #     alloc.__replace__(
+        #         # TODO we actually only need that for the last iteration ... and its expensive
+        #         # or we compute it only on demand based on the solution
+        #         # flood_usage=alloc.building.usage_for(
+        #         #     alloc.take_remote, alloc.make_full_total()
+        #         # )
+        #     )
+        #     for alloc in allocated
+        # ]
+
+    return allocated
+
+
+@profile
 def prefer_local(allocated: list[Allocated]) -> list[Allocated]:
     block_ids = {id(alloc.block) for alloc in allocated}
     allocated = list(allocated)
@@ -2658,6 +2758,16 @@ class Allocated:
             make_aux_remote=aux,
         )
 
+    def np_flooded(self, take_total: farray) -> Allocated:
+        # TODO eventually we dont need the ivec here anymore
+        main, aux = self.building.np_produces_ips(take_total)
+        return self.__replace__(
+            make_main_local=izeros(),
+            make_aux_local=izeros(),
+            make_main_remote=ivec_from_np(main),
+            make_aux_remote=ivec_from_np(aux),
+        )
+
     def is_make_nonnegative(self) -> bool:
         total = self.make_full_total()
         return total.is_nonnegative()
@@ -2743,7 +2853,8 @@ def solver_state_from_blocks(blocks: list[Block]) -> list[Allocated]:
 def solver_update_state(
     allocated: list[Allocated],
 ) -> tuple[list[Allocated], list[Allocated]]:
-    flooded = flood_forward(allocated)
+    # flooded = flood_forward(allocated)
+    flooded = np_flood_forward(allocated)
     # TODO we could maybe build that into flood_forward eventually?
     allocated = prefer_local(flooded)
     # allocated = back_pressure(allocated)
