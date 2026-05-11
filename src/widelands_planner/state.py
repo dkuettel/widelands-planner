@@ -563,14 +563,21 @@ class BaseBuilding:
     def np_take_make_ips_from_craftings(
         self, craftings: Sequence[Crafting], speed: float
     ) -> tuple[farray, farray, farray]:
-        if len(craftings) == 0:
-            return np_zeros(), np_zeros(), np_zeros()
         take = np.sum([c.np.take for c in craftings], axis=0)
         make_main = np.sum([c.np.make_main for c in craftings], axis=0)
         make_aux = np.sum([c.np.make_aux for c in craftings], axis=0)
         dt = sum(c.seconds(speed) for c in craftings) + self.pause
         assert dt > 0
         return take / dt, make_main / dt, make_aux / dt
+
+    def np_take_make_ips_from_craftings_new(
+        self, craftings: Sequence[Crafting], speed: float
+    ) -> tuple[farray, farray, farray, farray, float]:
+        take = np.stack([c.np.take for c in craftings])
+        make_main = np.stack([c.np.make_main for c in craftings])
+        make_aux = np.stack([c.np.make_aux for c in craftings])
+        dt = np.array([c.seconds(speed) for c in craftings])
+        return take, make_main, make_aux, dt, self.pause
 
     def produces_ips(
         self,
@@ -721,7 +728,7 @@ class BaseBuilding:
         np_limit = np_from_ivec(limit)
 
         np_total_take_ips, np_total_make_main_ips, np_total_make_aux_ips, used = (
-            self.np_allocate_ips_new(takes, makes, speed, np_allocation, np_limit)
+            self.np_allocate_ips_new_np(takes, makes, speed, np_allocation, np_limit)
         )
 
         return (
@@ -732,7 +739,7 @@ class BaseBuilding:
         )
 
     @profile
-    def np_allocate_ips_new(
+    def np_allocate_ips_new_np(
         self,
         takes: set[Item],
         makes: set[Item],
@@ -744,6 +751,7 @@ class BaseBuilding:
         crafting_levels: list[list[Crafting]] = self.get_enabled_crafting_levels(
             takes, makes
         )
+        # TODO this might be precomputed or cached?
         crafting_levels = [
             [
                 crafting
@@ -754,83 +762,83 @@ class BaseBuilding:
             for level in crafting_levels
         ]
         crafting_levels = [level for level in crafting_levels if len(level) > 0]
+
         np_total_take_ips = np_zeros()
         np_total_make_main_ips = np_zeros()
         np_total_make_aux_ips = np_zeros()
-        used = 0.0
-        while used < 1.0 and len(crafting_levels) > 0:
-            np_take_ips, np_make_main_ips, np_make_aux_ips = (
-                self.np_take_make_ips_from_craftings(crafting_levels[0], speed)
+        used: float = 0.0
+
+        while len(crafting_levels) > 0:
+            c_take, c_make_main, c_make_aux, c_dt, c_pause = (
+                self.np_take_make_ips_from_craftings_new(crafting_levels.pop(0), speed)
             )
 
-            np_allocation_ratios = np.divide(
-                np_allocation,
-                np_take_ips,
-                where=np_take_ips > 0.0,
-                out=np.full(len(Item), np.inf),
-            )
-            np_allocation_index = np_allocation_ratios.argmin()
-            np_allocation_ratio = np_allocation_ratios[np_allocation_index]
-            if np.isposinf(np_allocation_ratio):
-                np_allocation_ratio = 1.0
-                np_allocation_item = None
-            else:
-                assert np.isfinite(np_allocation_ratio)
-                np_allocation_item = list(Item)[np_allocation_index]
+            while used < 1.0 and len(c_take) > 0:
+                dt = np.sum(c_dt, axis=0) + c_pause
+                assert dt > 0.0
+                np_take_ips = np.sum(c_take, axis=0) / dt
+                np_make_main_ips = np.sum(c_make_main, axis=0) / dt
+                np_make_aux_ips = np.sum(c_make_aux, axis=0) / dt
 
-            np_limit_ratios = np.divide(
-                np_limit,
-                np_make_main_ips,
-                where=np_make_main_ips > 0.0,
-                out=np.full(len(Item), np.inf),
-            )
-            np_limit_index = np_limit_ratios.argmin()
-            np_limit_ratio = np_limit_ratios[np_limit_index]
-            if np.isfinite(np_limit_ratio):
-                np_limit_item = list(Item)[np_limit_index]
-            else:
-                np_limit_ratio = 1.0
-                np_limit_item = None
+                np_allocation_ratios = np.divide(
+                    np_allocation,
+                    np_take_ips,
+                    where=np_take_ips > 0.0,
+                    out=np.full(len(Item), np.inf),
+                )
+                np_allocation_index = np_allocation_ratios.argmin()
+                np_allocation_ratio = np_allocation_ratios[np_allocation_index]
+                if np.isposinf(np_allocation_ratio):
+                    np_allocation_ratio = 1.0
+                    np_allocation_item = None
+                else:
+                    assert np.isfinite(np_allocation_ratio)
+                    np_allocation_item = list(Item)[np_allocation_index]
 
-            np_ratio = min(np_allocation_ratio, np_limit_ratio)
+                np_limit_ratios = np.divide(
+                    np_limit,
+                    np_make_main_ips,
+                    where=np_make_main_ips > 0.0,
+                    out=np.full(len(Item), np.inf),
+                )
+                np_limit_index = np_limit_ratios.argmin()
+                np_limit_ratio = np_limit_ratios[np_limit_index]
+                if np.isfinite(np_limit_ratio):
+                    np_limit_item = list(Item)[np_limit_index]
+                else:
+                    np_limit_ratio = 1.0
+                    np_limit_item = None
 
-            # TODO will it work when they are both true? or is there a problem when they should be both true but eps makes only one true?
-            used_allocation_ratio = np_ratio == np_allocation_ratio
-            used_limit_ratio = np_ratio == np_limit_ratio
+                np_ratio = min(np_allocation_ratio, np_limit_ratio)
 
-            # TODO doesnt this break used_limit_ratio and used_allocation_ratio in some cases?
-            old_used, used = used, min(used + np_ratio, 1.0)
-            np_ratio = used - old_used
+                # TODO will it work when they are both true? or is there a problem when they should be both true but eps makes only one true?
+                used_allocation_ratio = np_ratio == np_allocation_ratio
+                used_limit_ratio = np_ratio == np_limit_ratio
 
-            # TODO i think here and limit below are expensive because with inf and min(0, ...) they become dense, np here should help?
-            # allocation = allocation.sub(take_ips.smul(ratio))
-            # allocation = allocation.low_clipped(0.0)
-            # if allocation_item is not None and used_allocation_ratio:
-            #     allocation.data[allocation_item] = 0.0
-            # assert all(v >= 0.0 for v in allocation.data.values()), allocation
-            np_allocation = (np_allocation - np_take_ips * np_ratio).clip(0.0, None)
-            if np_allocation_item is not None and used_allocation_ratio:
-                np_allocation[np_allocation_index] = 0.0
+                # TODO doesnt this break used_limit_ratio and used_allocation_ratio in some cases?
+                old_used, used = used, min(used + np_ratio, 1.0)
+                np_ratio = used - old_used
 
-            np_limit = (np_limit - np_make_main_ips * np_ratio).clip(0.0, None)
-            if np_limit_item is not None and used_limit_ratio:
-                np_limit[np_limit_index] = 0.0
+                np_allocation = (np_allocation - np_take_ips * np_ratio).clip(0.0, None)
+                if np_allocation_item is not None and used_allocation_ratio:
+                    np_allocation[np_allocation_index] = 0.0
 
-            np_total_take_ips += np_take_ips * np_ratio
-            np_total_make_main_ips += np_make_main_ips * np_ratio
-            np_total_make_aux_ips += np_make_aux_ips * np_ratio
+                np_limit = (np_limit - np_make_main_ips * np_ratio).clip(0.0, None)
+                if np_limit_item is not None and used_limit_ratio:
+                    np_limit[np_limit_index] = 0.0
 
-            # TODO repeated with code at the beginning
-            crafting_levels = [
-                [
-                    crafting
-                    for crafting in level
-                    if np.all((crafting.np.take == 0.0) | (np_allocation > 0.0))
-                    and np.all((crafting.np.make_main == 0.0) | (np_limit > 0.0))
-                ]
-                for level in crafting_levels
-            ]
-            crafting_levels = [level for level in crafting_levels if len(level) > 0]
+                np_total_take_ips += np_take_ips * np_ratio
+                np_total_make_main_ips += np_make_main_ips * np_ratio
+                np_total_make_aux_ips += np_make_aux_ips * np_ratio
+
+                keep_allocation = np.all(c_take[:, np_allocation == 0.0] == 0.0, axis=1)
+                keep_limit = np.all(c_make_main[:, np_limit == 0.0] == 0.0, axis=1)
+                keep = keep_allocation & keep_limit
+                c_take = c_take[keep, :]
+                c_make_main = c_make_main[keep, :]
+                c_make_aux = c_make_aux[keep, :]
+                c_dt = c_dt[keep]
+
         assert 0 <= used <= 1.0, used
 
         return (
@@ -938,7 +946,7 @@ class BaseBuilding:
         allocation: farray,
         limit: farray,
     ):
-        take, _make_main, _make_aux, _used = self.np_allocate_ips_new(
+        take, _make_main, _make_aux, _used = self.np_allocate_ips_new_np(
             takes, makes, speed, allocation, limit
         )
         return take
@@ -2169,6 +2177,7 @@ def flood_forward(allocated: list[Allocated]) -> list[Allocated]:
             for alloc, take_total, demand in zips(allocated, take_totals, demands)
         ]
 
+        # TODO I think next we want to speed up this, and for that the input needs to be np already
         allocated = [alloc.flooded(alloc.take_remote) for alloc in allocated]
 
         # assert all(alloc.is_make_nonnegative() for alloc in allocated)
