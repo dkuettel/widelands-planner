@@ -13,6 +13,7 @@ from collections.abc import (
     Sequence,
     Set,
 )
+from concurrent.futures import ProcessPoolExecutor
 from cProfile import Profile
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -803,10 +804,10 @@ class BaseBuilding:
                 np_allocation_ratio = np_allocation_ratios[np_allocation_index]
                 if np.isposinf(np_allocation_ratio):
                     np_allocation_ratio = 1.0
-                    np_allocation_item = None
+                    has_allocation_item = False
                 else:
                     assert np.isfinite(np_allocation_ratio)
-                    np_allocation_item = list(Item)[np_allocation_index]
+                    has_allocation_item = True
 
                 np_limit_ratios = np.divide(
                     np_limit,
@@ -817,10 +818,10 @@ class BaseBuilding:
                 np_limit_index = np_limit_ratios.argmin()
                 np_limit_ratio = np_limit_ratios[np_limit_index]
                 if np.isfinite(np_limit_ratio):
-                    np_limit_item = list(Item)[np_limit_index]
+                    has_limit_item = True
                 else:
                     np_limit_ratio = 1.0
-                    np_limit_item = None
+                    has_limit_item = False
 
                 np_ratio = min(np_allocation_ratio, np_limit_ratio)
 
@@ -833,11 +834,11 @@ class BaseBuilding:
                 np_ratio = used - old_used
 
                 np_allocation = (np_allocation - np_take_ips * np_ratio).clip(0.0, None)
-                if np_allocation_item is not None and used_allocation_ratio:
+                if has_allocation_item is not None and used_allocation_ratio:
                     np_allocation[np_allocation_index] = 0.0
 
                 np_limit = (np_limit - np_make_main_ips * np_ratio).clip(0.0, None)
-                if np_limit_item is not None and used_limit_ratio:
+                if has_limit_item is not None and used_limit_ratio:
                     np_limit[np_limit_index] = 0.0
 
                 np_total_take_ips += np_take_ips * np_ratio
@@ -2222,6 +2223,10 @@ def flood_forward(allocated: list[Allocated]) -> list[Allocated]:
     return allocated
 
 
+def run_flooded(alloc: Allocated, consumption: farray) -> farray:
+    return alloc.np_flooded(consumption)
+
+
 @profile
 def np_flood_forward(allocated: list[Allocated]) -> list[Allocated]:
     last_consumption = None
@@ -2261,9 +2266,19 @@ def np_flood_forward(allocated: list[Allocated]) -> list[Allocated]:
 
         consumption = consumption + demands * ratios[None, :]
 
+        # TODO this and the other allocate_ips based things are now the heaviest
+        # they kinda are easy to parallelize, with forking, thats one option
+        # or maybe they can just be made more efficient?
         production = np.stack(
             [alloc.np_flooded(consumption[i, :]) for i, alloc in enumerate(allocated)]
         )
+
+        # TODO correct, but slow, we really need forking for the cheapness
+        # or maybe use threading and fork at the allocate_ips point?
+        # or strip most my dataclasses again of their methods? and then we can control much better what we run? can we?
+        # TODO could also switch to 32 or 16 bit? probably using 64 now everywhere
+        # with ProcessPoolExecutor() as pool:
+        #     production = np.stack(list(pool.map(run_flooded, allocated, consumption)))
 
         # TODO this could be computed in one go above
         # TODO hm usage for with limit for output, did we update the output?
