@@ -2313,6 +2313,7 @@ def np_flood_forward(allocated: list[Allocated]) -> list[Allocated]:
             or np.any(np.abs(last_production - production) > ips_eps)
         )
     ):
+        last_last_consumption = last_consumption
         last_consumption = consumption
         last_production = production
 
@@ -2331,11 +2332,20 @@ def np_flood_forward(allocated: list[Allocated]) -> list[Allocated]:
 
         consumption = consumption + demands * ratios[None, :]
 
+        def maybe_flood(i: int, alloc: Allocated) -> farray:
+            # TODO this could be vectorized then
+            if last_last_consumption is not None and np.all(
+                last_last_consumption[i, :] == consumption[i, :]
+            ):
+                return production[i, :]
+            return alloc.np_flooded(consumption[i, :])
+
         # TODO this and the other allocate_ips based things are now the heaviest
         # they kinda are easy to parallelize, with forking, thats one option
         # or maybe they can just be made more efficient?
+        # TODO threading might work because numpy releases the gil?
         production = np.stack(
-            [alloc.np_flooded(consumption[i, :]) for i, alloc in enumerate(allocated)]
+            [maybe_flood(i, alloc) for i, alloc in enumerate(allocated)]
         )
 
         # TODO correct, but slow, we really need forking for the cheapness
