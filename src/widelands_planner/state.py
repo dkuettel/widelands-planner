@@ -573,10 +573,10 @@ class BaseBuilding:
     def np_take_make_ips_from_craftings_new(
         self, craftings: Sequence[Crafting], speed: float
     ) -> tuple[farray, farray, farray, farray, float]:
-        take = np.stack([c.np.take for c in craftings])
-        make_main = np.stack([c.np.make_main for c in craftings])
-        make_aux = np.stack([c.np.make_aux for c in craftings])
-        dt = np.array([c.seconds(speed) for c in craftings])
+        take = np.stack([c.np.take for c in craftings], dtype=np.float32)
+        make_main = np.stack([c.np.make_main for c in craftings], dtype=np.float32)
+        make_aux = np.stack([c.np.make_aux for c in craftings], dtype=np.float32)
+        dt = np.array([c.seconds(speed) for c in craftings], dtype=np.float32)
         return take, make_main, make_aux, dt, self.pause
 
     def produces_ips(
@@ -756,6 +756,10 @@ class BaseBuilding:
         np_allocation: farray,
         np_limit: farray | None,
     ) -> tuple[farray, farray, farray, float]:
+        np_allocation = np_allocation.astype(np.float32)
+        if np_limit is not None:
+            np_limit = np_limit.astype(np.float32)
+
         # TODO actually we can only control the takes, not the makes, right?
         crafting_levels: list[list[Crafting]] = self.get_enabled_crafting_levels(
             takes, makes
@@ -776,9 +780,9 @@ class BaseBuilding:
         ]
         crafting_levels = [level for level in crafting_levels if len(level) > 0]
 
-        np_total_take_ips = np_zeros()
-        np_total_make_main_ips = np_zeros()
-        np_total_make_aux_ips = np_zeros()
+        np_total_take_ips = np_zeros().astype(np.float32)
+        np_total_make_main_ips = np_zeros().astype(np.float32)
+        np_total_make_aux_ips = np_zeros().astype(np.float32)
         used: float = 0.0
 
         while len(crafting_levels) > 0:
@@ -798,7 +802,7 @@ class BaseBuilding:
                     np_allocation,
                     np_take_ips,
                     where=np_take_ips > 0.0,
-                    out=np.full(len(Item), np.inf),
+                    out=np.full(len(Item), np.inf, dtype=np.float32),
                 )
                 np_allocation_index = np_allocation_ratios.argmin()
                 np_allocation_ratio = np_allocation_ratios[np_allocation_index]
@@ -814,7 +818,7 @@ class BaseBuilding:
                         np_limit,
                         np_make_main_ips,
                         where=np_make_main_ips > 0.0,
-                        out=np.full(len(Item), np.inf),
+                        out=np.full(len(Item), np.inf, dtype=np.float32),
                     )
                     np_limit_index = np_limit_ratios.argmin()
                     np_limit_ratio = np_limit_ratios[np_limit_index]
@@ -867,6 +871,10 @@ class BaseBuilding:
                 c_dt = c_dt[keep]
 
         assert 0 <= used <= 1.0, used
+
+        assert np_total_take_ips.dtype == np.float32
+        assert np_total_make_main_ips.dtype == np.float32
+        assert np_total_make_aux_ips.dtype == np.float32
 
         return (
             np_total_take_ips,
