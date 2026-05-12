@@ -748,7 +748,6 @@ class BaseBuilding:
             used,
         )
 
-    @profile
     def np_allocate_ips_new_np(
         self,
         takes: set[Item],
@@ -2447,6 +2446,83 @@ def prefer_local(allocated: list[Allocated]) -> list[Allocated]:
     return allocated
 
 
+def np_prefer_local(allocated: list[Allocated]) -> list[Allocated]:
+    block_ids = {id(alloc.block) for alloc in allocated}
+    by_block_id = {id: i for (i, id) in enumerate(block_ids)}
+
+    B: Final = len(block_ids)
+    N: Final = len(allocated)
+    I: Final = len(Item)
+
+    production_main = np.zeros([B, N, I])
+    production_aux = np.zeros([B, N, I])
+    consumption = np.zeros([B, N, I])
+
+    for i, alloc in enumerate(allocated):
+        k = by_block_id[id(alloc.block)]
+        production_main[k, i, :] = np_from_ivec(alloc.make_main_local) + np_from_ivec(
+            alloc.make_main_remote
+        )
+        production_aux[k, i, :] = np_from_ivec(alloc.make_aux_local) + np_from_ivec(
+            alloc.make_aux_remote
+        )
+        consumption[k, i, :] = np_from_ivec(alloc.take_local) + np_from_ivec(
+            alloc.take_remote
+        )
+
+    block_production_main = np.sum(production_main, axis=1)
+    block_production_aux = np.sum(production_aux, axis=1)
+    block_consumption = np.sum(consumption, axis=1)
+
+    ratio_take = np.divide(
+        block_production_main + block_production_aux,
+        block_consumption,
+        where=block_consumption > 0.0,
+        out=np.full_like(block_consumption, 0.0),
+    ).clip(0.0, 1.0)
+
+    ratio_make = np.divide(
+        block_consumption,
+        block_production_main + block_production_aux,
+        where=block_production_main + block_production_aux > 0.0,
+        out=np.full_like(block_consumption, 0.0),
+    ).clip(0.0, 1.0)
+
+    local_consumption = consumption * ratio_take[:, None, :]
+    remote_consumption = consumption * (1.0 - ratio_take[:, None, :])
+
+    local_production_main = production_main * ratio_make[:, None, :]
+    remote_production_main = production_main * (1.0 - ratio_make[:, None, :])
+
+    local_production_aux = production_aux * ratio_make[:, None, :]
+    remote_production_aux = production_aux * (1.0 - ratio_make[:, None, :])
+
+    return [
+        alloc.__replace__(
+            take_local=ivec_from_np(
+                local_consumption[by_block_id[id(alloc.block)], i, :]
+            ),
+            take_remote=ivec_from_np(
+                remote_consumption[by_block_id[id(alloc.block)], i, :]
+            ),
+            make_main_local=ivec_from_np(
+                local_production_main[by_block_id[id(alloc.block)], i, :]
+            ),
+            make_main_remote=ivec_from_np(
+                remote_production_main[by_block_id[id(alloc.block)], i, :]
+            ),
+            # TODO mhh does aux even change?
+            make_aux_local=ivec_from_np(
+                local_production_aux[by_block_id[id(alloc.block)], i, :]
+            ),
+            make_aux_remote=ivec_from_np(
+                remote_production_aux[by_block_id[id(alloc.block)], i, :]
+            ),
+        )
+        for i, alloc in enumerate(allocated)
+    ]
+
+
 def back_reallocated(alloc: Allocated, limit: Ivec) -> Allocated:
     local = ifrom({i: min(alloc.take_local[i], limit[i]) for i in Item})
     remote = limit.sub(local)
@@ -2570,7 +2646,7 @@ def gen_back_pressure(
 
 def np_back_pressure(allocated: list[Allocated]) -> list[Allocated]:
     block_ids = {id(alloc.block) for alloc in allocated}
-    by_block_id = {id: i + 1 for (i, id) in enumerate(block_ids)}
+    by_block_id = {id: 1 + i for (i, id) in enumerate(block_ids)}
 
     B: Final = len(block_ids)
     N: Final = len(allocated)
@@ -2973,7 +3049,8 @@ def solver_update_state(
     # flooded = flood_forward(allocated)
     flooded = np_flood_forward(allocated)
     # TODO we could maybe build that into flood_forward eventually?
-    allocated = prefer_local(flooded)
+    # allocated = prefer_local(flooded)
+    allocated = np_prefer_local(flooded)
     # allocated = back_pressure(allocated)
     allocated = np_back_pressure(allocated)
     return allocated, flooded
