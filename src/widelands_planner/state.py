@@ -780,6 +780,7 @@ class BaseBuilding:
             for level in crafting_levels
         ]
         crafting_levels = [level for level in crafting_levels if len(level) > 0]
+        crafting_count = sum(1 for level in crafting_levels for _ in level)
 
         # TODO hm overall this actually makes it slightly slower :/ maybe once everything is streamlined it will help?
         # could also be that many buildings are so easy, just one item, and we use a full np array for that now?
@@ -807,6 +808,8 @@ class BaseBuilding:
         # np_total_take_ips = np_total_take_ips[item_mask]
         # np_total_make_main_ips = np_total_make_main_ips[item_mask]
         # np_total_make_aux_ips = np_total_make_aux_ips[item_mask]
+
+        count = 0
 
         while len(crafting_levels) > 0:
             c_take, c_make_main, c_make_aux, c_dt, c_pause = (
@@ -896,7 +899,13 @@ class BaseBuilding:
                 c_make_aux = c_make_aux[keep, :]
                 c_dt = c_dt[keep]
 
+                count += 1
+
         assert 0 <= used <= 1.0, used
+
+        # TODO indeed we do very few iterations, very often just 1
+        # so most of the up-front work in the function here is a problem
+        assert count <= crafting_count
 
         assert np_total_take_ips.dtype == np.float32
         assert np_total_make_main_ips.dtype == np.float32
@@ -2294,6 +2303,8 @@ def np_flood_forward(allocated: list[Allocated]) -> list[Allocated]:
         [[alloc.building.wants_ips(item) for item in Item] for alloc in allocated]
     )
 
+    count = 0
+
     while (
         last_consumption is None
         or last_production is None
@@ -2347,6 +2358,8 @@ def np_flood_forward(allocated: list[Allocated]) -> list[Allocated]:
         #     for alloc in allocated
         # ]
 
+        count += 1
+
     allocated = [
         alloc.__replace__(
             take_local=izeros(),
@@ -2360,6 +2373,8 @@ def np_flood_forward(allocated: list[Allocated]) -> list[Allocated]:
     ]
 
     allocated = [alloc.flooded(alloc.take_total()) for alloc in allocated]
+
+    print(f"{count} flooding iterations")
 
     return allocated
 
@@ -2567,6 +2582,8 @@ def np_back_pressure(allocated: list[Allocated]) -> list[Allocated]:
     }
     leaves = np_from_ivec(ifrom({i: 1.0 for i in leaf_items})) > 0
 
+    count = 0
+
     while (
         last_production_main is None
         or last_production_aux is None
@@ -2611,6 +2628,8 @@ def np_back_pressure(allocated: list[Allocated]) -> list[Allocated]:
             consumption[0, i, :] = new_remote
             consumption[k, i, :] = new_local
 
+        count += 1
+
     allocated = [
         alloc.__replace__(
             take_local=ivec_from_np(consumption[by_block_id[id(alloc.block)], i, :]),
@@ -2628,6 +2647,8 @@ def np_back_pressure(allocated: list[Allocated]) -> list[Allocated]:
         )
         for i, alloc in enumerate(allocated)
     ]
+
+    print(f" {count} pressure iterations")
 
     return allocated
 
