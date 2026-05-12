@@ -560,7 +560,6 @@ class BaseBuilding:
         assert dt > 0
         return take.sdiv(dt), make_main.sdiv(dt), make_aux.sdiv(dt)
 
-    @profile
     def np_take_make_ips_from_craftings(
         self, craftings: Sequence[Crafting], speed: float
     ) -> tuple[farray, farray, farray]:
@@ -619,7 +618,6 @@ class BaseBuilding:
         # probably that we have to move between ivec and numpy
         return new
 
-    @profile
     def allocate_ips_old(
         self,
         takes: set[Item],
@@ -722,7 +720,6 @@ class BaseBuilding:
         assert 0 <= used <= 1.0, used
         return total_take_ips, total_make_main_ips, total_make_aux_ips, used
 
-    @profile
     def allocate_ips_new(
         self,
         takes: set[Item],
@@ -751,7 +748,6 @@ class BaseBuilding:
             used,
         )
 
-    @profile
     def np_allocate_ips_new_np(
         self,
         takes: set[Item],
@@ -879,7 +875,6 @@ class BaseBuilding:
             used,
         )
 
-    @profile
     def wants_ips(
         self, takes: set[Item], makes: set[Item], speed: float, item: Item
     ) -> float:
@@ -2176,7 +2171,6 @@ def gen_flood_forward(
     return allocated
 
 
-@profile
 def flood_forward(allocated: list[Allocated]) -> list[Allocated]:
     prev_allocated = None
 
@@ -2244,7 +2238,6 @@ def run_flooded(alloc: Allocated, consumption: farray) -> farray:
     return alloc.np_flooded(consumption)
 
 
-@profile
 def np_flood_forward(allocated: list[Allocated]) -> list[Allocated]:
     last_consumption = None
     consumption = np.stack([np_from_ivec(alloc.take_total()) for alloc in allocated])
@@ -2327,7 +2320,6 @@ def np_flood_forward(allocated: list[Allocated]) -> list[Allocated]:
     return allocated
 
 
-@profile
 def prefer_local(allocated: list[Allocated]) -> list[Allocated]:
     block_ids = {id(alloc.block) for alloc in allocated}
     allocated = list(allocated)
@@ -2500,7 +2492,6 @@ def gen_back_pressure(
     return allocated
 
 
-@profile
 def np_back_pressure(allocated: list[Allocated]) -> list[Allocated]:
     block_ids = {id(alloc.block) for alloc in allocated}
     by_block_id = {id: i + 1 for (i, id) in enumerate(block_ids)}
@@ -2597,7 +2588,6 @@ def np_back_pressure(allocated: list[Allocated]) -> list[Allocated]:
     return allocated
 
 
-@profile
 def back_pressure(allocated: list[Allocated]) -> list[Allocated]:
     block_ids = {id(alloc.block) for alloc in allocated}
     prev_allocated = None
