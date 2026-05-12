@@ -13,7 +13,7 @@ from collections.abc import (
     Sequence,
     Set,
 )
-from concurrent.futures import ProcessPoolExecutor
+from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor
 from cProfile import Profile
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -2343,10 +2343,17 @@ def np_flood_forward(allocated: list[Allocated]) -> list[Allocated]:
         # TODO this and the other allocate_ips based things are now the heaviest
         # they kinda are easy to parallelize, with forking, thats one option
         # or maybe they can just be made more efficient?
-        # TODO threading might work because numpy releases the gil?
         production = np.stack(
             [maybe_flood(i, alloc) for i, alloc in enumerate(allocated)]
         )
+
+        # TODO threading might work because numpy releases the gil?
+        # maybe keep the pool alive between iterations? also not helping
+        # seems the overhead is too high
+        # with ThreadPoolExecutor() as pool:
+        #     production = np.stack(
+        #         list(pool.map(maybe_flood, range(len(allocated)), allocated))
+        #     )
 
         # TODO correct, but slow, we really need forking for the cheapness
         # or maybe use threading and fork at the allocate_ips point?
