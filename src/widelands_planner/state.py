@@ -748,6 +748,7 @@ class BaseBuilding:
             used,
         )
 
+    @profile
     def np_allocate_ips_new_np(
         self,
         takes: set[Item],
@@ -780,16 +781,41 @@ class BaseBuilding:
         ]
         crafting_levels = [level for level in crafting_levels if len(level) > 0]
 
+        # TODO hm overall this actually makes it slightly slower :/ maybe once everything is streamlined it will help?
+        # could also be that many buildings are so easy, just one item, and we use a full np array for that now?
+        # relevant_items = {
+        #     item
+        #     for level in crafting_levels
+        #     for crafting in level
+        #     for item in (
+        #         crafting.take.nonzero_items()
+        #         | crafting.make_main.nonzero_items()
+        #         | crafting.make_aux.nonzero_items()
+        #     )
+        # }
+        # item_mask = np.array([(item in relevant_items) for item in Item])
+
         np_total_take_ips = np_zeros().astype(np.float32)
         np_total_make_main_ips = np_zeros().astype(np.float32)
         np_total_make_aux_ips = np_zeros().astype(np.float32)
         used: float = 0.0
+
+        # np_allocation = np_allocation[item_mask]
+        # if np_limit is not None:
+        #     np_limit = np_limit[item_mask]
+
+        # np_total_take_ips = np_total_take_ips[item_mask]
+        # np_total_make_main_ips = np_total_make_main_ips[item_mask]
+        # np_total_make_aux_ips = np_total_make_aux_ips[item_mask]
 
         while len(crafting_levels) > 0:
             c_take, c_make_main, c_make_aux, c_dt, c_pause = (
                 # TODO costs, but actually its hiding a few stacks, so not actually that much
                 self.np_take_make_ips_from_craftings_new(crafting_levels.pop(0), speed)
             )
+            # c_take = c_take[:, item_mask]
+            # c_make_main = c_make_main[:, item_mask]
+            # c_make_aux = c_make_aux[:, item_mask]
 
             while used < 1.0 and len(c_take) > 0:
                 dt = np.sum(c_dt, axis=0) + c_pause
@@ -802,7 +828,7 @@ class BaseBuilding:
                     np_allocation,
                     np_take_ips,
                     where=np_take_ips > 0.0,
-                    out=np.full(len(Item), np.inf, dtype=np.float32),
+                    out=np.full_like(np_allocation, np.inf, dtype=np.float32),
                 )
                 np_allocation_index = np_allocation_ratios.argmin()
                 np_allocation_ratio = np_allocation_ratios[np_allocation_index]
@@ -818,7 +844,7 @@ class BaseBuilding:
                         np_limit,
                         np_make_main_ips,
                         where=np_make_main_ips > 0.0,
-                        out=np.full(len(Item), np.inf, dtype=np.float32),
+                        out=np.full_like(np_limit, np.inf, dtype=np.float32),
                     )
                     np_limit_index = np_limit_ratios.argmin()
                     np_limit_ratio = np_limit_ratios[np_limit_index]
@@ -876,10 +902,20 @@ class BaseBuilding:
         assert np_total_make_main_ips.dtype == np.float32
         assert np_total_make_aux_ips.dtype == np.float32
 
+        # dense_total_take_ips = np_zeros()
+        # dense_total_take_ips[item_mask] = np_total_take_ips
+        # dense_total_make_main_ips = np_zeros()
+        # dense_total_make_main_ips[item_mask] = np_total_make_main_ips
+        # dense_total_make_aux_ips = np_zeros()
+        # dense_total_make_aux_ips[item_mask] = np_total_make_aux_ips
+
         return (
             np_total_take_ips,
             np_total_make_main_ips,
             np_total_make_aux_ips,
+            # dense_total_take_ips,
+            # dense_total_make_main_ips,
+            # dense_total_make_aux_ips,
             used,
         )
 
