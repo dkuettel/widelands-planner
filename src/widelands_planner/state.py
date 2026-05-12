@@ -2604,6 +2604,10 @@ def np_back_pressure(allocated: list[Allocated]) -> list[Allocated]:
             or np.any(np.abs(last_consumption - consumption) > ips_eps)
         )
     ):
+        last_last_production_main = last_production_main
+        last_last_production_aux = last_production_aux
+        last_last_consumption = last_consumption
+
         last_production_main = production_main
         last_production_aux = production_aux
         last_consumption = consumption
@@ -2624,6 +2628,24 @@ def np_back_pressure(allocated: list[Allocated]) -> list[Allocated]:
         production_main = production_main * keep_ratio[:, None, :]
 
         for i, alloc in enumerate(allocated):
+            if (
+                last_last_consumption is not None
+                and last_last_production_main is not None
+                and last_last_production_aux is not None
+                and np.all(
+                    np.sum(consumption[:, i, :], axis=0)
+                    == np.sum(last_last_consumption[:, i, :], axis=0)
+                )
+                and np.all(
+                    np.sum(production_main[:, i, :], axis=0)
+                    == np.sum(last_last_production_main[:, i, :], axis=0)
+                )
+                and np.all(
+                    np.sum(production_aux[:, i, :], axis=0)
+                    == np.sum(last_last_production_aux[:, i, :], axis=0)
+                )
+            ):
+                continue
             new_consumption = alloc.building.np_back_pressure(
                 np.sum(consumption[:, i, :], axis=0),
                 np.sum(production_main[:, i, :], axis=0)
