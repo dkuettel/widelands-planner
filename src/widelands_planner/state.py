@@ -599,9 +599,8 @@ class BaseBuilding:
         speed: float,
         allocation: farray,
     ) -> tuple[farray, farray]:
-        np_limit = np_from_ivec(ifrom({i: math.inf for i in Item}))
         _np_total_take_ips, np_total_make_main_ips, np_total_make_aux_ips, _used = (
-            self.np_allocate_ips_new_np(takes, makes, speed, allocation, np_limit)
+            self.np_allocate_ips_new_np(takes, makes, speed, allocation, None)
         )
         return np_total_make_main_ips, np_total_make_aux_ips
 
@@ -759,7 +758,7 @@ class BaseBuilding:
         makes: set[Item],
         speed: float,
         np_allocation: farray,
-        np_limit: farray,
+        np_limit: farray | None,
     ) -> tuple[farray, farray, farray, float]:
         # TODO actually we can only control the takes, not the makes, right?
         crafting_levels: list[list[Crafting]] = self.get_enabled_crafting_levels(
@@ -770,8 +769,12 @@ class BaseBuilding:
             [
                 crafting
                 for crafting in level
+                # TODO costs
                 if np.all((crafting.np.take == 0.0) | (np_allocation > 0.0))
-                and np.all((crafting.np.make_main == 0.0) | (np_limit > 0.0))
+                and (
+                    np_limit is None
+                    or np.all((crafting.np.make_main == 0.0) | (np_limit > 0.0))
+                )
             ]
             for level in crafting_levels
         ]
@@ -784,6 +787,7 @@ class BaseBuilding:
 
         while len(crafting_levels) > 0:
             c_take, c_make_main, c_make_aux, c_dt, c_pause = (
+                # TODO costs, but actually its hiding a few stacks, so not actually that much
                 self.np_take_make_ips_from_craftings_new(crafting_levels.pop(0), speed)
             )
 
@@ -809,19 +813,24 @@ class BaseBuilding:
                     assert np.isfinite(np_allocation_ratio)
                     has_allocation_item = True
 
-                np_limit_ratios = np.divide(
-                    np_limit,
-                    np_make_main_ips,
-                    where=np_make_main_ips > 0.0,
-                    out=np.full(len(Item), np.inf),
-                )
-                np_limit_index = np_limit_ratios.argmin()
-                np_limit_ratio = np_limit_ratios[np_limit_index]
-                if np.isfinite(np_limit_ratio):
-                    has_limit_item = True
+                if np_limit is not None:
+                    np_limit_ratios = np.divide(
+                        np_limit,
+                        np_make_main_ips,
+                        where=np_make_main_ips > 0.0,
+                        out=np.full(len(Item), np.inf),
+                    )
+                    np_limit_index = np_limit_ratios.argmin()
+                    np_limit_ratio = np_limit_ratios[np_limit_index]
+                    if np.isfinite(np_limit_ratio):
+                        has_limit_item = True
+                    else:
+                        np_limit_ratio = 1.0
+                        has_limit_item = False
                 else:
-                    np_limit_ratio = 1.0
+                    np_limit_ratio = math.inf
                     has_limit_item = False
+                    np_limit_index = None
 
                 np_ratio = min(np_allocation_ratio, np_limit_ratio)
 
@@ -837,17 +846,25 @@ class BaseBuilding:
                 if has_allocation_item is not None and used_allocation_ratio:
                     np_allocation[np_allocation_index] = 0.0
 
-                np_limit = (np_limit - np_make_main_ips * np_ratio).clip(0.0, None)
-                if has_limit_item is not None and used_limit_ratio:
-                    np_limit[np_limit_index] = 0.0
+                if np_limit is not None:
+                    np_limit = (np_limit - np_make_main_ips * np_ratio).clip(0.0, None)
+                    if (
+                        np_limit is not None
+                        and has_limit_item is not None
+                        and used_limit_ratio
+                    ):
+                        np_limit[np_limit_index] = 0.0
 
                 np_total_take_ips += np_take_ips * np_ratio
                 np_total_make_main_ips += np_make_main_ips * np_ratio
                 np_total_make_aux_ips += np_make_aux_ips * np_ratio
 
                 keep_allocation = np.all(c_take[:, np_allocation == 0.0] == 0.0, axis=1)
-                keep_limit = np.all(c_make_main[:, np_limit == 0.0] == 0.0, axis=1)
-                keep = keep_allocation & keep_limit
+                if np_limit is not None:
+                    keep_limit = np.all(c_make_main[:, np_limit == 0.0] == 0.0, axis=1)
+                    keep = keep_allocation & keep_limit
+                else:
+                    keep = keep_allocation
                 c_take = c_take[keep, :]
                 c_make_main = c_make_main[keep, :]
                 c_make_aux = c_make_aux[keep, :]
