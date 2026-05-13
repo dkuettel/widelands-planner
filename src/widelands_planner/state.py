@@ -2098,73 +2098,6 @@ def gen_flood_forward(
     return allocated
 
 
-def flood_forward(allocated: list[Allocated]) -> list[Allocated]:
-    prev_allocated = None
-
-    while not have_allocations_converged(prev_allocated, allocated):
-        prev_allocated = allocated
-
-        # allocated = [alloc.flooded() for alloc in allocated]
-        # assert all(alloc.is_make_nonnegative() for alloc in allocated)
-
-        consumption = consumption_from_allocated(allocated)
-        production = full_production_from_allocated(allocated)
-
-        # TODO surplus = production.sub(consumption)
-        take_totals = [alloc.take_total() for alloc in allocated]
-        demands: list[Ivec] = [izeros() for _ in allocated]
-        ratios: Ivec = izeros()
-
-        for item in Item:
-            surplus = production[item] - consumption[item]
-            if surplus <= 0.0:
-                continue
-            for i, (alloc, take_total) in enumerate(zips(allocated, take_totals)):
-                demands[i].data[item] = clipped(
-                    0.0,
-                    # alloc.building.wants_ips(item) - alloc.take_total()[item],
-                    # TODO wants_ips is pretty constant, almost never changes! cache in ConfiguredBuilding?
-                    alloc.building.wants_ips(item) - take_total[item],
-                    None,
-                )
-            total_demand = sum(d[item] for d in demands)
-            if total_demand <= 0.0:
-                continue
-            ratios.data[item] = clipped(0.0, surplus / total_demand, 1.0)
-
-        allocated = [
-            alloc.__replace__(
-                take_local=izeros(),
-                take_remote=take_total.add(demand.mul(ratios)),
-            )
-            for alloc, take_total, demand in zips(allocated, take_totals, demands)
-        ]
-
-        # TODO I think next we want to speed up this, and for that the input needs to be np already
-        allocated = [alloc.flooded(alloc.take_remote) for alloc in allocated]
-
-        # assert all(alloc.is_make_nonnegative() for alloc in allocated)
-
-        # TODO this could be computed in one go above
-        # TODO hm usage for with limit for output, did we update the output?
-        # allocated = [
-        #     alloc.__replace__(
-        #         # TODO we actually only need that for the last iteration ... and its expensive
-        #         # or we compute it only on demand based on the solution
-        #         # flood_usage=alloc.building.usage_for(
-        #         #     alloc.take_remote, alloc.make_full_total()
-        #         # )
-        #     )
-        #     for alloc in allocated
-        # ]
-
-    return allocated
-
-
-def run_flooded(alloc: Allocated, consumption: farray) -> farray:
-    return alloc.np_flooded(consumption)
-
-
 def np_flood_forward(allocated: list[Allocated]) -> list[Allocated]:
     last_consumption = None
     consumption = np.stack([np_from_ivec(alloc.take_total()) for alloc in allocated])
@@ -2270,57 +2203,6 @@ def np_flood_forward(allocated: list[Allocated]) -> list[Allocated]:
     return allocated
 
 
-def prefer_local(allocated: list[Allocated]) -> list[Allocated]:
-    block_ids = {id(alloc.block) for alloc in allocated}
-    allocated = list(allocated)
-    total_takes = [alloc.take_total() for alloc in allocated]
-    total_makes_main = [alloc.make_main_total() for alloc in allocated]
-    total_makes_aux = [alloc.make_aux_total() for alloc in allocated]
-    for block_id in block_ids:
-        block_allocated_ids = [
-            i for (i, alloc) in enumerate(allocated) if id(alloc.block) == block_id
-        ]
-        block_allocated = [allocated[i] for i in block_allocated_ids]
-        block_consumption = consumption_from_allocated(block_allocated)
-        block_production = full_production_from_allocated(block_allocated)
-        for item in Item:
-            if block_consumption[item] > 0.0:
-                ratio_take = block_production[item] / block_consumption[item]
-                ratio_take = clipped(0.0, ratio_take, 1.0)
-            else:
-                ratio_take = 0.0
-            if block_production[item] > 0.0:
-                ratio_make = block_consumption[item] / block_production[item]
-                ratio_make = clipped(0.0, ratio_make, 1.0)
-            else:
-                ratio_make = 0.0
-            for i in block_allocated_ids:
-                total_take = total_takes[i]
-                total_make_main = total_makes_main[i]
-                total_make_aux = total_makes_aux[i]
-                allocated[i] = allocated[i].__replace__(
-                    take_remote=allocated[i].take_remote.updated(
-                        {item: (1.0 - ratio_take) * total_take[item]}
-                    ),
-                    take_local=allocated[i].take_local.updated(
-                        {item: ratio_take * total_take[item]}
-                    ),
-                    make_main_remote=allocated[i].make_main_remote.updated(
-                        {item: (1.0 - ratio_make) * total_make_main[item]}
-                    ),
-                    make_aux_remote=allocated[i].make_aux_remote.updated(
-                        {item: (1.0 - ratio_make) * total_make_aux[item]}
-                    ),
-                    make_main_local=allocated[i].make_main_local.updated(
-                        {item: ratio_make * total_make_main[item]}
-                    ),
-                    make_aux_local=allocated[i].make_aux_local.updated(
-                        {item: ratio_make * total_make_aux[item]}
-                    ),
-                )
-    return allocated
-
-
 def np_prefer_local(allocated: list[Allocated]) -> list[Allocated]:
     block_ids = {id(alloc.block) for alloc in allocated}
     by_block_id = {id: i for (i, id) in enumerate(block_ids)}
@@ -2398,17 +2280,6 @@ def np_prefer_local(allocated: list[Allocated]) -> list[Allocated]:
     ]
 
 
-def back_reallocated(alloc: Allocated, limit: Ivec) -> Allocated:
-    local = ifrom({i: min(alloc.take_local[i], limit[i]) for i in Item})
-    remote = limit.sub(local)
-    return alloc.__replace__(
-        take_local=local,
-        take_remote=remote,
-        # TODO see when we are going to set this now
-        # usage=None if out_limit is None else alloc.building.usage_for(total, out_limit),
-    )
-
-
 def np_back_reallocated(
     remote_consumption: np.typing.NDArray[np.floating],
     local_consumption: np.typing.NDArray[np.floating],
@@ -2417,106 +2288,6 @@ def np_back_reallocated(
     local_consumption = np.minimum(local_consumption, limit)
     remote_consumption = limit - local_consumption
     return remote_consumption, local_consumption
-
-
-def gen_back_pressure(
-    allocated: list[Allocated],
-) -> Generator[list[Allocated], None, list[Allocated]]:
-    block_ids = {id(alloc.block) for alloc in allocated}
-    prev_allocated = None
-
-    while not have_allocations_converged(prev_allocated, allocated):
-        prev_allocated = allocated
-        allocated = list(allocated)
-
-        # TODO should it be a setting what we want to have unlimited?
-        # TODO because we dont treat None vs 0.0 very well, I have this hack for now
-        # TODO also, in a way, would this change per iteration?
-        # TODO still causes problems, eg: one well, one reindeer farm, farm wants water, but is stuck at 0.0, and then well gets no back-pressure (but still stays local)
-        leaf_items = set(Item) - {
-            item for alloc in allocated for item in alloc.take_total().nonzero_items()
-        }
-
-        for block_id in block_ids:
-            block_allocated_ids = [
-                i for i, alloc in enumerate(allocated) if id(alloc.block) == block_id
-            ]
-            block_allocated = [allocated[i] for i in block_allocated_ids]
-            block_consumption = isum(alloc.take_local for alloc in block_allocated)
-            block_production_main = isum(
-                alloc.make_main_local for alloc in block_allocated
-            )
-            block_production_aux = isum(
-                alloc.make_aux_local for alloc in block_allocated
-            )
-            block_keep_ratios = ifrom(
-                {
-                    item: clipped(
-                        0.0,
-                        (block_consumption[item] - block_production_aux[item])
-                        / block_production_main[item],
-                        1.0,
-                    )
-                    for item in Item
-                    if block_production_main[item] > 0.0
-                }
-            )
-            block_keep_ratios = block_keep_ratios.updated(
-                {item: 1.0 for item in leaf_items}
-            )
-            for i in block_allocated_ids:
-                allocated[i] = allocated[i].__replace__(
-                    make_main_local=allocated[i].make_main_local.mul(block_keep_ratios)
-                )
-
-        consumption = isum(alloc.take_remote for alloc in allocated)
-        production_main = isum(alloc.make_main_remote for alloc in allocated)
-        production_aux = isum(alloc.make_aux_remote for alloc in allocated)
-        keep_ratios = ifrom(
-            {
-                item: min(
-                    max(
-                        0.0,
-                        (consumption[item] - production_aux[item])
-                        / production_main[item],
-                    ),
-                    1.0,
-                )
-                for item in Item
-                if production_main[item] > 0.0
-            }
-        )
-        keep_ratios = keep_ratios.updated({item: 1.0 for item in leaf_items})
-        allocated = [
-            alloc.__replace__(make_main_remote=alloc.make_main_remote.mul(keep_ratios))
-            for alloc in allocated
-        ]
-
-        allocated = [
-            back_reallocated(
-                alloc,
-                alloc.building.back_pressure(
-                    alloc.take_total(), alloc.make_full_total()
-                ),
-            )
-            for alloc in allocated
-        ]
-
-        # TODO this could be computed in one go above
-        allocated = [
-            alloc.__replace__(
-                stable_usage=alloc.building.usage_for(
-                    alloc.take_total(), alloc.make_full_total()
-                ),
-                # TODO leaf items is a global thing anyway, we could have it as state and decide then and there
-                is_infinite=alloc.building.building.makes <= leaf_items,
-            )
-            for alloc in allocated
-        ]
-
-        yield allocated
-
-    return allocated
 
 
 def np_back_pressure(allocated: list[Allocated]) -> list[Allocated]:
@@ -2643,105 +2414,6 @@ def np_back_pressure(allocated: list[Allocated]) -> list[Allocated]:
     return allocated
 
 
-def back_pressure(allocated: list[Allocated]) -> list[Allocated]:
-    block_ids = {id(alloc.block) for alloc in allocated}
-    prev_allocated = None
-
-    while not have_allocations_converged(prev_allocated, allocated):
-        prev_allocated = allocated
-        allocated = list(allocated)
-
-        # TODO should it be a setting what we want to have unlimited?
-        # TODO because we dont treat None vs 0.0 very well, I have this hack for now
-        # TODO also, in a way, would this change per iteration?
-        # TODO still causes problems, eg: one well, one reindeer farm, farm wants water, but is stuck at 0.0, and then well gets no back-pressure (but still stays local)
-        leaf_items = set(Item) - {
-            item for alloc in allocated for item in alloc.take_total().nonzero_items()
-        }
-
-        for block_id in block_ids:
-            block_allocated_ids = [
-                i for i, alloc in enumerate(allocated) if id(alloc.block) == block_id
-            ]
-            block_allocated = [allocated[i] for i in block_allocated_ids]
-            block_consumption = isum(alloc.take_local for alloc in block_allocated)
-            block_production_main = isum(
-                alloc.make_main_local for alloc in block_allocated
-            )
-            block_production_aux = isum(
-                alloc.make_aux_local for alloc in block_allocated
-            )
-            block_keep_ratios = ifrom(
-                {
-                    item: clipped(
-                        0.0,
-                        (block_consumption[item] - block_production_aux[item])
-                        / block_production_main[item],
-                        1.0,
-                    )
-                    for item in Item
-                    if block_production_main[item] > 0.0
-                }
-            )
-            block_keep_ratios = block_keep_ratios.updated(
-                {item: 1.0 for item in leaf_items}
-            )
-            for i in block_allocated_ids:
-                allocated[i] = allocated[i].__replace__(
-                    make_main_local=allocated[i].make_main_local.mul(block_keep_ratios)
-                )
-
-        consumption = isum(alloc.take_remote for alloc in allocated)
-        production_main = isum(alloc.make_main_remote for alloc in allocated)
-        production_aux = isum(alloc.make_aux_remote for alloc in allocated)
-        keep_ratios = ifrom(
-            {
-                item: min(
-                    max(
-                        0.0,
-                        (consumption[item] - production_aux[item])
-                        / production_main[item],
-                    ),
-                    1.0,
-                )
-                for item in Item
-                if production_main[item] > 0.0
-            }
-        )
-        keep_ratios = keep_ratios.updated({item: 1.0 for item in leaf_items})
-        allocated = [
-            alloc.__replace__(make_main_remote=alloc.make_main_remote.mul(keep_ratios))
-            for alloc in allocated
-        ]
-
-        allocated = [
-            back_reallocated(
-                alloc,
-                # TODO call and totals here is heaviest now
-                alloc.building.back_pressure(
-                    alloc.take_total(), alloc.make_full_total()
-                ),
-            )
-            for alloc in allocated
-        ]
-
-        # TODO this could be computed in one go above
-        # TODO an also it could be done only at the end of this, and even at the end of everything outside
-        allocated = [
-            alloc.__replace__(
-                # TODO again not very cheap, and only needed for the final solution
-                # stable_usage=alloc.building.usage_for(
-                #     alloc.take_total(), alloc.make_full_total()
-                # ),
-                # TODO leaf items is a global thing anyway, we could have it as state and decide then and there
-                is_infinite=alloc.building.building.makes <= leaf_items,
-            )
-            for alloc in allocated
-        ]
-
-    return allocated
-
-
 ips_eps: Final = 0.01 / 5 / 60
 
 
@@ -2851,64 +2523,6 @@ class Allocated:
         )
 
 
-def fixpoints(blocks: list[Block]) -> Iterator[list[Allocated]]:
-    prev_allocated = None
-    allocated = [
-        Allocated.from_init(block=block, building=building)
-        for block in blocks
-        for building in block.buildings
-    ]
-
-    while not have_allocations_converged(prev_allocated, allocated):
-        prev_allocated = allocated
-
-        allocated = yield from gen_flood_forward(allocated)
-        # TODO we could maybe build that into flood_forward eventually?
-        allocated = prefer_local(allocated)
-
-        allocated = yield from gen_back_pressure(allocated)
-
-        yield rounded_allocations(allocated)
-        # yield allocated
-
-
-def last[T](it: Iterable[T]) -> T:
-    [last] = deque(it, maxlen=1)
-    return last
-
-
-def fixpoint(blocks: list[Block]) -> tuple[str, list[list[Allocated]]]:
-    t = time.perf_counter_ns()
-
-    it = fixpoints(blocks)
-
-    count, allocated = 1, next(it)
-
-    # NOTE could also stop on max time, not max iterations
-    max_count = 1000
-
-    # TODO actually this is a bit bad, we could stop inside a flood-back cycle
-    # which makes it not only not converged, but not even "sealed"
-    for count, allocated in zip(range(2, max_count + 1), it):
-        pass
-
-    dt = round((time.perf_counter_ns() - t) / 1_000_000)
-
-    if count < max_count:
-        status = f"{count} iterations converged in {dt}ms"
-    else:
-        status = f"{count} iterations did not converge in {dt}ms"
-
-    # TODO we only block up the allocations when we actually return it
-    # the iterations stay flat, but I think even the iterations would benefit from blocked data
-    by_building = {id(alloc.building): alloc for alloc in allocated}
-    blocked = [
-        [by_building[id(building)] for building in block.buildings] for block in blocks
-    ]
-
-    return status, blocked
-
-
 def solver_state_from_blocks(blocks: list[Block]) -> list[Allocated]:
     return [
         Allocated.from_init(block=block, building=building)
@@ -2917,7 +2531,7 @@ def solver_state_from_blocks(blocks: list[Block]) -> list[Allocated]:
     ]
 
 
-# @profile
+@profile
 def solver_update_state(
     allocated: list[Allocated],
 ) -> tuple[list[Allocated], list[Allocated]]:
@@ -2939,27 +2553,6 @@ def solver_has_converged(
     prev: None | list[Allocated], allocated: list[Allocated]
 ) -> bool:
     return have_allocations_converged(prev, allocated)
-
-
-def profile_fixpoint(blocks: list[Block]) -> tuple[str, list[list[Allocated]]]:
-    with Profile() as p:
-        result = fixpoint(blocks)
-
-    now = datetime.now()
-    path = Path(f"./profiles/test-{now.isoformat()}.prof")
-    path.parent.mkdir(exist_ok=True, parents=True)
-
-    # NOTE uv run tool tuna file.prof
-    # TODO results seem strange, is tuna broken? in cli i see more
-    # maybe run this in isolation, outside of streamlit
-    # hmm or maybe run a second time? or need to reload in tuna?
-    p.dump_stats(path)
-
-    link = Path("./profiles/latest")
-    link.unlink(missing_ok=True)
-    link.symlink_to(path.name)
-
-    return result
 
 
 # def pyinstrument_fixpoint(blocks: list[Block]) -> tuple[str, list[list[Allocated]]]:

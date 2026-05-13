@@ -12,7 +12,6 @@ from widelands_planner.state import (
     ConfiguredGenericBuilding,
     Item,
     building_from_name,
-    fixpoint,
     get_buildings,
     have_allocations_converged,
     print_block,
@@ -481,14 +480,14 @@ def examples():
     # blocks = setup6()
     blocks = setup7()
 
-    status, blocked_allocated = fixpoint(blocks)
-
-    print(status)
-
-    for i, allocated in enumerate(blocked_allocated):
-        print()
-        print(f"block {i}:")
-        print_block(allocated)
+    # status, blocked_allocated = fixpoint(blocks)
+    #
+    # print(status)
+    #
+    # for i, allocated in enumerate(blocked_allocated):
+    #     print()
+    #     print(f"block {i}:")
+    #     print_block(allocated)
 
 
 def bench():
