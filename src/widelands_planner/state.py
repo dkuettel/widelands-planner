@@ -3,7 +3,7 @@ from __future__ import annotations
 import math
 import re
 import time
-from collections import defaultdict, deque
+from collections import deque
 from collections.abc import (
     Callable,
     Generator,
@@ -13,24 +13,16 @@ from collections.abc import (
     Sequence,
     Set,
 )
-from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor
 from cProfile import Profile
 from dataclasses import dataclass, field
 from datetime import datetime
 from enum import StrEnum
 from functools import cache, partial, wraps
 from pathlib import Path
-from typing import Final, final, override
+from typing import Final, override
 
 import numpy as np
-import torch
-from qpsolvers import (
-    Solution,
-    solve_problem,  # pyright: ignore[reportUnknownVariableType]
-)
-from qpsolvers.problem import Problem
 from tabulate import tabulate
-from torch import Tensor, nn
 
 zips = partial(zip, strict=True)
 
@@ -38,13 +30,13 @@ type farray = np.typing.NDArray[np.floating]
 
 
 def profile[**P, R](fn: Callable[P, R]) -> Callable[P, R]:
-    import line_profiler
+    import line_profiler  # pyright: ignore[reportMissingImports]
 
-    fn = line_profiler.profile(fn)  # pyright: ignore[reportUnknownVariableType]
+    fn = line_profiler.profile(fn)  # pyright: ignore[reportUnknownVariableType, reportUnknownMemberType]
 
-    @wraps(fn)
+    @wraps(fn)  # pyright: ignore[reportUnknownArgumentType]
     def wrapper(*args: P.args, **kwargs: P.kwargs) -> R:
-        return fn(*args, **kwargs)
+        return fn(*args, **kwargs)  # pyright: ignore[reportUnknownVariableType]
 
     return wrapper
 
@@ -1928,123 +1920,6 @@ def iterative(blocks: list[Block]) -> tuple[Ivec, Ivec]:
     return take, make  # pyright: ignore[reportReturnType]
 
 
-# def get_balance(blocks: list[Block]) -> None:
-#     # NOTE probably assuming no cycles in the production graph (frisians might have one eventually)
-#
-#     takes: dict[int | None, Ivec] = defaultdict(Ivec.from_zeros)
-#     makes: dict[int | None, Ivec] = defaultdict(Ivec.from_zeros)
-#     # TODO initialize with last solution
-#     takes, makes = None, None
-#
-#     while todo(takes, makes):
-#         last_takes, last_makes = takes, makes
-#
-#         takes: dict[int | None, Ivec] = defaultdict(Ivec.from_zeros)
-#         makes: dict[int | None, Ivec] = defaultdict(Ivec.from_zeros)
-#
-#         for block in blocks:
-#             for count in block.buildings:
-#                 # TODO an Ivec on (block|None, Item) would be easier now? flat and full?
-#                 # TODO also, a block is not really isolated, so we cant just half-ass produce there :/ it wont happen
-#                 # this only goes for global stuff, arrrg
-#                 # what if we compute everything global, but warn about non-local leaking, except for the ones we import/export?
-#                 lt = last_takes[id(block)].add(last_takes[None].include(block.imports))
-#                 mt = last_makes[id(block)].add(last_makes[None].include(block.exports))
-#
-#                 t = count.takes_ips(lt, lm)
-#                 takes[None].add(t.include(block.imports))
-#                 takes[id(block)].add(t.exclude(block.imports))
-#
-#                 m = count.makes_ips(lt, lm)
-#                 makes[None].add(m.include(block.exports))
-#                 makes[id(block)].add(m.exclude(block.exports))
-
-
-@final
-class Model(nn.Module):
-    def __init__(self, counts: list[BuildingCount]):
-        super().__init__()
-        self.counts = counts
-        self.usage_logits = nn.ParameterList(torch.tensor(0.0) for _ in counts)
-
-    @override
-    def forward(self):
-        takes: dict[Item, list[Tensor]] = defaultdict(list)
-        makes: dict[Item, list[Tensor]] = defaultdict(list)
-
-        for count, usage_logit in zip(self.counts, self.usage_logits, strict=True):
-            u = torch.sigmoid(usage_logit)
-            ts = {i: u * v for (i, v) in count.takes_ips().data.items()}
-            ms = {i: u * v for (i, v) in count.makes_ips().data.items()}
-            for i, v in ts.items():
-                takes[i].append(v)
-            for i, v in ms.items():
-                makes[i].append(v)
-
-        take: dict[Item, Tensor] = {
-            i: torch.sum(torch.stack(vs)) for i, vs in takes.items() if len(vs) > 0
-        }
-        make: dict[Item, Tensor] = {
-            i: torch.sum(torch.stack(vs)) for i, vs in makes.items() if len(vs) > 0
-        }
-
-        balances = [
-            (take.get(i, torch.tensor(0.0)) - make.get(i, torch.tensor(0.0))).pow(2.0)
-            for i in Item
-            if i in take
-        ]
-        loss_balances = torch.mean(torch.stack(balances))
-
-        # TODO could be nicer to make it a loss that can be zero, so subtract from the max? also more balanced with other loss
-        dangles = [
-            -make.get(i, torch.tensor(0.0)).pow(2.0) for i in Item if i not in take
-        ]
-        loss_dangles = torch.mean(torch.stack(dangles))
-
-        loss_usage = torch.mean(
-            torch.stack(
-                [
-                    torch.tensor(1.0) - torch.sigmoid(usage_logit)
-                    for usage_logit in self.usage_logits
-                ]
-            )
-        )
-
-        return loss_balances + loss_dangles, loss_balances, loss_usage, loss_dangles
-
-
-def opt(
-    blocks: list[Block],
-) -> Iterator[tuple[tuple[float, ...], list[tuple[BuildingCount, float]]]]:
-    counts = [count for block in blocks for count in block.buildings]
-    if len(counts) == 0:
-        return
-    model = Model(counts)
-
-    # TODO wait, how does a >1 lr make sense again?
-    optim = torch.optim.SGD(params=model.parameters(), lr=1000, maximize=False)
-    # optim = torch.optim.Adam(params=model.parameters(), maximize=False)
-    model.train()
-
-    for i in range(10000):
-        optim.zero_grad()
-        [loss, *more] = model()
-        loss.backward()
-        optim.step()  # pyright: ignore[reportUnknownMemberType]
-
-        if i % 1000 == 0:
-            with torch.no_grad():
-                yield (
-                    (loss.item(), *(i.item() for i in more)),
-                    [
-                        (count, torch.sigmoid(logit).item())
-                        for (count, logit) in zip(
-                            counts, model.usage_logits, strict=True
-                        )
-                    ],
-                )
-
-
 @dataclass(frozen=True)
 class Variable:
     desc: str
@@ -2076,86 +1951,86 @@ class Inequality:
     const: float
 
 
-def build_qp(
-    min: dict[Variable, float], equations: Sequence[Equality]
-) -> tuple[list[Variable], Problem]:
-    vars = set(min) | {var for equation in equations for var in equation.variables()}
-    vars = list(vars)
-    N = len(vars)
-    K = len(equations)
+# def build_qp(
+#     min: dict[Variable, float], equations: Sequence[Equality]
+# ) -> tuple[list[Variable], Problem]:
+#     vars = set(min) | {var for equation in equations for var in equation.variables()}
+#     vars = list(vars)
+#     N = len(vars)
+#     K = len(equations)
+#
+#     lb = np.array(
+#         [-math.inf if var.lb is None else var.lb for var in vars], dtype=np.float32
+#     )
+#     ub = np.array(
+#         [-math.inf if var.ub is None else var.ub for var in vars], dtype=np.float32
+#     )
+#
+#     P = np.zeros([N, N], dtype=np.float32)
+#     for var, w in min.items():
+#         i = vars.index(var)
+#         P[i, i] = w
+#
+#     A = np.zeros([K, N], dtype=np.float32)
+#     b = np.zeros([K], dtype=np.float32)
+#     for i, eq in enumerate(equations):
+#         for var, weight in eq.vars.items():
+#             A[i, vars.index(var)] = weight
+#         b[i] = eq.const
+#
+#     problem = Problem(
+#         P=P,
+#         q=np.zeros([N], dtype=np.float32),
+#         A=A,
+#         b=b,
+#         lb=lb,
+#         ub=ub,
+#     )
+#
+#     return vars, problem
 
-    lb = np.array(
-        [-math.inf if var.lb is None else var.lb for var in vars], dtype=np.float32
-    )
-    ub = np.array(
-        [-math.inf if var.ub is None else var.ub for var in vars], dtype=np.float32
-    )
 
-    P = np.zeros([N, N], dtype=np.float32)
-    for var, w in min.items():
-        i = vars.index(var)
-        P[i, i] = w
-
-    A = np.zeros([K, N], dtype=np.float32)
-    b = np.zeros([K], dtype=np.float32)
-    for i, eq in enumerate(equations):
-        for var, weight in eq.vars.items():
-            A[i, vars.index(var)] = weight
-        b[i] = eq.const
-
-    problem = Problem(
-        P=P,
-        q=np.zeros([N], dtype=np.float32),
-        A=A,
-        b=b,
-        lb=lb,
-        ub=ub,
-    )
-
-    return vars, problem
-
-
-def qp(blocks: list[Block]) -> tuple[list[str], Solution] | None:
-    counts = [count for block in blocks for count in block.buildings]
-    if len(counts) == 0:
-        return None
-
-    balances: dict[Item, Equality] = {i: Equality(dict(), 0.0) for i in Item}
-    idles: list[Variable] = []
-    equations: list[Equality] = []
-    mins: dict[Variable, float] = dict()
-
-    for count in counts:
-        take, make, eqs, idle, ms = count.get_constraints()
-        for item, weights in take.items():
-            for var, weight in weights.items():
-                # TODO there should never be the variable existing already
-                balances[item].vars[var] = balances[item].vars.get(var, 0.0) - weight
-        for item, weights in make.items():
-            for var, weight in weights.items():
-                balances[item].vars[var] = balances[item].vars.get(var, 0.0) + weight
-        equations.extend(eqs)
-        idles.append(idle)
-        mins.update(ms)
-
-    def has_consumption(equation: Equality) -> bool:
-        return any(v < 0.0 for v in equation.vars.values())
-
-    balances = {
-        item: equation
-        for (item, equation) in balances.items()
-        # TODO its nice and clean, but we might not want that after all?
-        # adding a building could bring everything to zero, maybe have options
-        # anyway options for exploring the solution space and seeing how much is needed?
-        if has_consumption(equation)
-    }
-
-    vars, problem = build_qp(mins, list(balances.values()) + equations)
-    # TODO clarabel likes scipy.sparse.csc_matrix for speed, and no warnings
-    # TODO also, if it fails with numerical error, how do we see that?
-    solution = solve_problem(problem, solver="clarabel")
-
-    return [var.desc for var in vars], solution
+# def qp(blocks: list[Block]) -> tuple[list[str], Solution] | None:
+#     counts = [count for block in blocks for count in block.buildings]
+#     if len(counts) == 0:
+#         return None
+#
+#     balances: dict[Item, Equality] = {i: Equality(dict(), 0.0) for i in Item}
+#     idles: list[Variable] = []
+#     equations: list[Equality] = []
+#     mins: dict[Variable, float] = dict()
+#
+#     for count in counts:
+#         take, make, eqs, idle, ms = count.get_constraints()
+#         for item, weights in take.items():
+#             for var, weight in weights.items():
+#                 # TODO there should never be the variable existing already
+#                 balances[item].vars[var] = balances[item].vars.get(var, 0.0) - weight
+#         for item, weights in make.items():
+#             for var, weight in weights.items():
+#                 balances[item].vars[var] = balances[item].vars.get(var, 0.0) + weight
+#         equations.extend(eqs)
+#         idles.append(idle)
+#         mins.update(ms)
+#
+#     def has_consumption(equation: Equality) -> bool:
+#         return any(v < 0.0 for v in equation.vars.values())
+#
+#     balances = {
+#         item: equation
+#         for (item, equation) in balances.items()
+#         # TODO its nice and clean, but we might not want that after all?
+#         # adding a building could bring everything to zero, maybe have options
+#         # anyway options for exploring the solution space and seeing how much is needed?
+#         if has_consumption(equation)
+#     }
+#
+#     vars, problem = build_qp(mins, list(balances.values()) + equations)
+#     # TODO clarabel likes scipy.sparse.csc_matrix for speed, and no warnings
+#     # TODO also, if it fails with numerical error, how do we see that?
+#     solution = solve_problem(problem, solver="clarabel")
+#
+#     return [var.desc for var in vars], solution
 
 
 def consumption_from_allocated(allocated: list[Allocated]) -> Ivec:
@@ -3042,7 +2917,7 @@ def solver_state_from_blocks(blocks: list[Block]) -> list[Allocated]:
     ]
 
 
-@profile
+# @profile
 def solver_update_state(
     allocated: list[Allocated],
 ) -> tuple[list[Allocated], list[Allocated]]:
@@ -3087,13 +2962,13 @@ def profile_fixpoint(blocks: list[Block]) -> tuple[str, list[list[Allocated]]]:
     return result
 
 
-def pyinstrument_fixpoint(blocks: list[Block]) -> tuple[str, list[list[Allocated]]]:
-    from pyinstrument import Profiler
-
-    with Profiler() as p:
-        result = fixpoint(blocks)
-
-    time.sleep(5)
-    p.open_in_browser()
-
-    return result
+# def pyinstrument_fixpoint(blocks: list[Block]) -> tuple[str, list[list[Allocated]]]:
+#     from pyinstrument import Profiler
+#
+#     with Profiler() as p:
+#         result = fixpoint(blocks)
+#
+#     time.sleep(5)
+#     p.open_in_browser()
+#
+#     return result
