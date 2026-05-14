@@ -2278,29 +2278,10 @@ def np_back_reallocated(
 
 
 def np_back_pressure(allocated: list[Allocated]) -> list[Allocated]:
-    block_ids = {id(alloc.block) for alloc in allocated}
-    by_block_id = {id: 1 + i for (i, id) in enumerate(block_ids)}
+    production, consumption, index = np_allocated(allocated)
 
-    B: Final = len(block_ids)
-    N: Final = len(allocated)
-    I: Final = len(Item)
-
-    last_production_main = None
-    last_production_aux = None
-    production_main = np.zeros([1 + B, N, I])
-    production_aux = np.zeros([1 + B, N, I])
-
+    last_production = None
     last_consumption = None
-    consumption = np.zeros([1 + B, N, I])
-
-    for i, alloc in enumerate(allocated):
-        k = by_block_id[id(alloc.block)]
-        production_main[0, i, :] = np_from_ivec(alloc.make_main_remote)
-        production_main[k, i, :] = np_from_ivec(alloc.make_main_local)
-        production_aux[0, i, :] = np_from_ivec(alloc.make_aux_remote)
-        production_aux[k, i, :] = np_from_ivec(alloc.make_aux_local)
-        consumption[0, i, :] = np_from_ivec(alloc.take_remote)
-        consumption[k, i, :] = np_from_ivec(alloc.take_local)
 
     # TODO ok to do it only once, correct i think, but not the same as the old version
     leaf_items = set(Item) - {
@@ -2311,89 +2292,88 @@ def np_back_pressure(allocated: list[Allocated]) -> list[Allocated]:
     count = 0
 
     while (
-        last_production_main is None
-        or last_production_aux is None
+        last_production is None
         or last_consumption is None
         or (
-            np.any(np.abs(last_production_main - production_main) > ips_eps)
-            or np.any(np.abs(last_production_aux - production_aux) > ips_eps)
+            np.any(np.abs(last_production - production) > ips_eps)
             or np.any(np.abs(last_consumption - consumption) > ips_eps)
         )
     ):
-        last_last_production_main = last_production_main
-        last_last_production_aux = last_production_aux
+        last_last_production = last_production
         last_last_consumption = last_consumption
 
-        last_production_main = production_main
-        last_production_aux = production_aux
-        last_consumption = consumption
+        last_production = production.copy()
+        last_consumption = consumption.copy()
 
-        total_production_main = np.sum(production_main, axis=1)
-        total_production_aux = np.sum(production_aux, axis=1)
-        total_consumption = np.sum(consumption, axis=1)
+        total_production = np.sum(production[:, :, 0, :, :], axis=1)
+        total_consumption = np.sum(consumption[:, :, 0, :], axis=1)
         keep_ratio = np.divide(
-            total_consumption - total_production_aux,
-            total_production_main,
-            where=total_production_main > 0.0,
-            out=np.ones_like(total_production_main),
+            total_consumption - total_production[:, 1, :],
+            total_production[:, 0, :],
+            where=total_production[:, 0, :] > 0.0,
+            out=np.ones_like(total_consumption),
         )
         keep_ratio = keep_ratio.clip(0.0, 1.0)
-        # TODO precompute? or better way for broadcasting?
+        # TODO precompute? or better way for broadcasting? could do in where of np.divide
         keep_ratio[np.broadcast_to(leaves[None, :], keep_ratio.shape)] = 1.0
 
-        production_main = production_main * keep_ratio[:, None, :]
+        global_production = np.sum(production[:, :, 1, :, :], axis=(0, 1))
+        global_consumption = np.sum(consumption[:, :, 1, :], axis=(0, 1))
+        global_keep_ratio = np.divide(
+            global_consumption - global_production[1, :],
+            global_production[0, :],
+            where=global_production[0, :] > 0.0,
+            out=np.ones_like(global_consumption),
+        )
+        global_keep_ratio = global_keep_ratio.clip(0.0, 1.0)
+        global_keep_ratio[leaves] = 1.0
+
+        # TODO better broadcasting?
+        # TODO curious that we dont change aux here ever in the iterations
+        production[:, :, 0, 0, :] = production[:, :, 0, 0, :] * keep_ratio[:, None, :]
+        production[:, :, 1, 0, :] = (
+            production[:, :, 1, 0, :] * global_keep_ratio[None, None, :]
+        )
 
         for i, alloc in enumerate(allocated):
+            # TODO this can be done cheaper now
+            # TODO why last_last? might be suboptimal, try when everything else is fine again
             if (
                 last_last_consumption is not None
-                and last_last_production_main is not None
-                and last_last_production_aux is not None
+                and last_last_production is not None
                 and np.all(
-                    np.sum(consumption[:, i, :], axis=0)
-                    == np.sum(last_last_consumption[:, i, :], axis=0)
+                    np.sum(consumption[*index[i], :, :], axis=0)
+                    == np.sum(last_last_consumption[*index[i], :, :], axis=0)
                 )
                 and np.all(
-                    np.sum(production_main[:, i, :], axis=0)
-                    == np.sum(last_last_production_main[:, i, :], axis=0)
-                )
-                and np.all(
-                    np.sum(production_aux[:, i, :], axis=0)
-                    == np.sum(last_last_production_aux[:, i, :], axis=0)
+                    np.sum(production[*index[i], :, :, :], axis=(0, 1))
+                    == np.sum(last_last_production[*index[i], :, :, :], axis=(0, 1))
                 )
             ):
                 continue
             new_consumption = alloc.building.np_back_pressure(
-                np.sum(consumption[:, i, :], axis=0),
-                np.sum(production_main[:, i, :], axis=0)
-                + np.sum(production_aux[:, i, :], axis=0),
+                np.sum(consumption[*index[i], :, :], axis=0),
+                # TODO hm should we pass aux as limit?
+                np.sum(production[*index[i], :, :, :], axis=(0, 1)),
             )
-            k = by_block_id[id(alloc.block)]
             new_remote, new_local = np_back_reallocated(
-                consumption[0, i, :],
-                consumption[k, i, :],
+                consumption[*index[i], 1, :],
+                consumption[*index[i], 0, :],
                 new_consumption,
             )
-            consumption[0, i, :] = new_remote
-            consumption[k, i, :] = new_local
+            consumption[*index[i], 1, :] = new_remote
+            consumption[*index[i], 0, :] = new_local
 
         count += 1
 
+    # TODO mhh does aux even change?
+    allocated = np_unallocated(allocated, production, consumption, index)
+
     allocated = [
         alloc.__replace__(
-            take_local=ivec_from_np(consumption[by_block_id[id(alloc.block)], i, :]),
-            take_remote=ivec_from_np(consumption[0, i, :]),
-            make_main_local=ivec_from_np(
-                production_main[by_block_id[id(alloc.block)], i, :]
-            ),
-            make_main_remote=ivec_from_np(production_main[0, i, :]),
-            # TODO mhh does aux even change?
-            make_aux_local=ivec_from_np(
-                production_aux[by_block_id[id(alloc.block)], i, :]
-            ),
-            make_aux_remote=ivec_from_np(production_aux[0, i, :]),
             is_infinite=alloc.building.building.makes <= leaf_items,
         )
-        for i, alloc in enumerate(allocated)
+        for alloc in allocated
     ]
 
     print(f" {count} pressure iterations")
