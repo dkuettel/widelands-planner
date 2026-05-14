@@ -14,11 +14,11 @@ from widelands_planner.state import (
     BuildingCount,
     ConfiguredGenericBuilding,
     Item,
+    allocated_from_state,
     building_from_name,
     get_buildings,
     have_allocations_converged,
     ips_eps,
-    allocated_from_state,
     print_block,
     rounded_allocations,
     solve,
@@ -496,6 +496,8 @@ def bench():
     gt = pickle.loads(Path("./solution.pickle").read_bytes())
     gt = [alloc for block in gt for alloc in block]
 
+    allocated = [alloc for block in allocated for alloc in block]
+
     assert have_allocations_converged(gt, allocated), "solution is off"
     print("solution is correct")
 
@@ -518,6 +520,6 @@ def wants():
 
 
 def test():
-    examples()
-    # bench()
+    # examples()
+    bench()
     # wants()

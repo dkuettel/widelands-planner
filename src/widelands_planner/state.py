@@ -2409,6 +2409,15 @@ def solver_update_state(
     return state, flooded_state, leaf_items
 
 
+def has_state_converged(old: None | SolverState, new: SolverState) -> bool:
+    if old is None:
+        return False
+    r = np.all(np.abs(old.production - new.production) < ips_eps) and np.all(
+        np.abs(old.consumption - new.consumption) < ips_eps
+    )
+    return r.item()
+
+
 def solve(blocks: list[list[BuildingCount]]) -> tuple[list[list[Allocated]], int]:
     prev_state = None
     state = solver_state_from_blocks(blocks)
@@ -2416,11 +2425,7 @@ def solve(blocks: list[list[BuildingCount]]) -> tuple[list[list[Allocated]], int
     leaf_items: set[Item] = set()
 
     count = 0
-    while (
-        prev_state is None
-        or np.any(np.abs(prev_state.production - state.production) > ips_eps)
-        or np.any(np.abs(prev_state.consumption - state.consumption) > ips_eps)
-    ):
+    while not has_state_converged(prev_state, state):
         prev_state = state
         state, flooded_state, leaf_items = solver_update_state(state)
         count += 1
