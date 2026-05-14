@@ -3,7 +3,7 @@ from __future__ import annotations
 import math
 import re
 import time
-from collections import deque
+from collections import Counter, deque
 from collections.abc import (
     Callable,
     Generator,
@@ -2204,77 +2204,79 @@ def np_flood_forward(allocated: list[Allocated]) -> list[Allocated]:
 
 
 def np_prefer_local(allocated: list[Allocated]) -> list[Allocated]:
-    block_ids = {id(alloc.block) for alloc in allocated}
-    by_block_id = {id: i for (i, id) in enumerate(block_ids)}
+    block_ids = list({id(alloc.block) for alloc in allocated})
 
     B: Final = len(block_ids)
-    N: Final = len(allocated)
+    N: Final = max(Counter(id(alloc.block) for alloc in allocated).values())
     I: Final = len(Item)
 
-    production_main = np.zeros([B, N, I])
-    production_aux = np.zeros([B, N, I])
-    consumption = np.zeros([B, N, I])
+    counts = [0] * B
+    index: list[tuple[int, int]] = []
+    for alloc in allocated:
+        b = block_ids.index(id(alloc.block))
+        counts[b] += 1
+        index.append((b, counts[b] - 1))
+    assert all(c <= N for c in counts), (N, counts)
+
+    # [block, building, local/remote, main/aux, item]
+    production = np.zeros([B, N, 2, 2, I])
+
+    # [block, building, local/remote, item]
+    consumption = np.zeros([B, N, 2, I])
 
     for i, alloc in enumerate(allocated):
-        k = by_block_id[id(alloc.block)]
-        production_main[k, i, :] = np_from_ivec(alloc.make_main_local) + np_from_ivec(
-            alloc.make_main_remote
-        )
-        production_aux[k, i, :] = np_from_ivec(alloc.make_aux_local) + np_from_ivec(
-            alloc.make_aux_remote
-        )
-        consumption[k, i, :] = np_from_ivec(alloc.take_local) + np_from_ivec(
-            alloc.take_remote
-        )
+        production[*index[i], 0, 0, :] = np_from_ivec(alloc.make_main_local)
+        production[*index[i], 1, 0, :] = np_from_ivec(alloc.make_main_remote)
+        production[*index[i], 0, 1, :] = np_from_ivec(alloc.make_aux_local)
+        production[*index[i], 1, 1, :] = np_from_ivec(alloc.make_aux_remote)
+        consumption[*index[i], 0, :] = np_from_ivec(alloc.take_local)
+        consumption[*index[i], 1, :] = np_from_ivec(alloc.take_remote)
 
-    block_production_main = np.sum(production_main, axis=1)
-    block_production_aux = np.sum(production_aux, axis=1)
-    block_consumption = np.sum(consumption, axis=1)
+    anywhere_production = np.sum(production, axis=2)
+    anywhere_consumption = np.sum(consumption, axis=2)
+
+    block_production = np.sum(anywhere_production, axis=(1, 2))
+    block_consumption = np.sum(anywhere_consumption, axis=1)
 
     ratio_take = np.divide(
-        block_production_main + block_production_aux,
+        block_production,
         block_consumption,
         where=block_consumption > 0.0,
-        out=np.full_like(block_consumption, 0.0),
+        out=np.full_like(block_production, 0.0),
     ).clip(0.0, 1.0)
 
     ratio_make = np.divide(
         block_consumption,
-        block_production_main + block_production_aux,
-        where=block_production_main + block_production_aux > 0.0,
+        block_production,
+        where=block_production > 0.0,
         out=np.full_like(block_consumption, 0.0),
     ).clip(0.0, 1.0)
 
-    local_consumption = consumption * ratio_take[:, None, :]
-    remote_consumption = consumption * (1.0 - ratio_take[:, None, :])
+    consumption = np.stack(
+        [
+            anywhere_consumption * ratio_take[:, None, :],
+            anywhere_consumption * (1.0 - ratio_take[:, None, :]),
+        ],
+        axis=2,
+    )
 
-    local_production_main = production_main * ratio_make[:, None, :]
-    remote_production_main = production_main * (1.0 - ratio_make[:, None, :])
-
-    local_production_aux = production_aux * ratio_make[:, None, :]
-    remote_production_aux = production_aux * (1.0 - ratio_make[:, None, :])
+    production = np.stack(
+        [
+            anywhere_production * ratio_make[:, None, None, :],
+            anywhere_production * (1.0 - ratio_make[:, None, None, :]),
+        ],
+        axis=2,
+    )
 
     return [
         alloc.__replace__(
-            take_local=ivec_from_np(
-                local_consumption[by_block_id[id(alloc.block)], i, :]
-            ),
-            take_remote=ivec_from_np(
-                remote_consumption[by_block_id[id(alloc.block)], i, :]
-            ),
-            make_main_local=ivec_from_np(
-                local_production_main[by_block_id[id(alloc.block)], i, :]
-            ),
-            make_main_remote=ivec_from_np(
-                remote_production_main[by_block_id[id(alloc.block)], i, :]
-            ),
+            take_local=ivec_from_np(consumption[*index[i], 0, :]),
+            take_remote=ivec_from_np(consumption[*index[i], 1, :]),
+            make_main_local=ivec_from_np(production[*index[i], 0, 0, :]),
+            make_main_remote=ivec_from_np(production[*index[i], 1, 0, :]),
             # TODO mhh does aux even change?
-            make_aux_local=ivec_from_np(
-                local_production_aux[by_block_id[id(alloc.block)], i, :]
-            ),
-            make_aux_remote=ivec_from_np(
-                remote_production_aux[by_block_id[id(alloc.block)], i, :]
-            ),
+            make_aux_local=ivec_from_np(production[*index[i], 0, 1, :]),
+            make_aux_remote=ivec_from_np(production[*index[i], 1, 1, :]),
         )
         for i, alloc in enumerate(allocated)
     ]
