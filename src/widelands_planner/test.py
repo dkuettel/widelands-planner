@@ -487,14 +487,12 @@ def examples():
     # blocks = setup6()
     blocks = setup7()
 
-    # status, blocked_allocated = fixpoint(blocks)
-    #
-    # print(status)
-    #
-    # for i, allocated in enumerate(blocked_allocated):
-    #     print()
-    #     print(f"block {i}:")
-    #     print_block(allocated)
+    blocks, _count = solve(blocks)
+
+    for i, block in enumerate(blocks):
+        print()
+        print(f"block {i}:")
+        print_block(block)
 
 
 def bench():
@@ -532,6 +530,6 @@ def wants():
 
 
 def test():
-    # examples()
-    bench()
+    examples()
+    # bench()
     # wants()

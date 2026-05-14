@@ -2447,7 +2447,7 @@ def solver_update_state(
     return state, flooded_state, leaf_items
 
 
-def solve(blocks: list[Block]) -> tuple[list[Allocated], int]:
+def solve(blocks: list[Block]) -> tuple[list[list[Allocated]], int]:
     prev_state = None
     state, allocated = solver_state_from_blocks(blocks)
     flooded_state = state
@@ -2490,7 +2490,16 @@ def solve(blocks: list[Block]) -> tuple[list[Allocated], int]:
 
     allocated = rounded_allocations(allocated)
 
-    return allocated, count
+    blocks: dict[int, dict[int, Allocated]] = dict()
+
+    for (i, j), alloc in zips(state.index, allocated):
+        blocks.setdefault(i, dict())[j] = alloc
+
+    listed_blocks = [
+        [i for _, i in sorted(block.items())] for _, block in sorted(blocks.items())
+    ]
+
+    return listed_blocks, count
 
 
 def solver_has_converged(
