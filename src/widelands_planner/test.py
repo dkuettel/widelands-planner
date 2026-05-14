@@ -18,8 +18,7 @@ from widelands_planner.state import (
     get_buildings,
     have_allocations_converged,
     ips_eps,
-    np_allocated,
-    np_unallocated,
+    allocated_from_state,
     print_block,
     rounded_allocations,
     solve,
@@ -473,12 +472,15 @@ def examples():
     # blocks = setup6()
     blocks = setup7()
 
-    blocks, _count = solve(blocks)
+    allocated, count = solve(blocks)
 
-    for i, block in enumerate(blocks):
+    for i, (alloc, block) in enumerate(zips(allocated, blocks)):
         print()
         print(f"block {i}:")
-        print_block(block)
+        print_block(block, alloc)
+
+    print()
+    print(f"{count} iterations")
 
 
 def bench():

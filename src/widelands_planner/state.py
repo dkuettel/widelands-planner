@@ -50,12 +50,12 @@ def str_from_ivec(vec: Ivec) -> str:
     return "{" + ", ".join(data) + "}"
 
 
-def print_block(allocated: Sequence[Allocated]):
+def print_block(buildings: list[BuildingCount], allocated: Sequence[Allocated]):
     data = [
         (
-            alloc.building.count,
+            building.count,
             str_from_usage(alloc),
-            alloc.building.building.building.name,
+            building.building.building.name,
             (
                 str_from_ivec(alloc.take_local.smul(60))
                 + " + "
@@ -71,7 +71,7 @@ def print_block(allocated: Sequence[Allocated]):
                 + str_from_ivec(alloc.make_aux_remote.smul(60))
             ),
         )
-        for alloc in allocated
+        for alloc, building in zips(allocated, buildings)
     ]
     print(tabulate(data, headers=["#", "%", "name", "take i/m", "make i/m"]))
 
@@ -2119,56 +2119,20 @@ def np_flood_forward(state: SolverState) -> SolverState:
     return SolverState(state.buildings, index, production, consumption)
 
 
-def np_allocated(
-    allocated: list[Allocated],
-) -> tuple[farray, farray, list[tuple[int, int]]]:
-    block_ids = list({id(alloc.block) for alloc in allocated})
-
-    B: Final = len(block_ids)
-    N: Final = max(Counter(id(alloc.block) for alloc in allocated).values())
-    I: Final = len(Item)
-
-    counts = [0] * B
-    index: list[tuple[int, int]] = []
-    for alloc in allocated:
-        b = block_ids.index(id(alloc.block))
-        counts[b] += 1
-        index.append((b, counts[b] - 1))
-    assert all(c <= N for c in counts), (N, counts)
-
-    # [block, building, local/remote, main/aux, item]
-    production = np.zeros([B, N, 2, 2, I])
-
-    # [block, building, local/remote, item]
-    consumption = np.zeros([B, N, 2, I])
-
-    for i, alloc in enumerate(allocated):
-        production[*index[i], 0, 0, :] = np_from_ivec(alloc.make_main_local)
-        production[*index[i], 1, 0, :] = np_from_ivec(alloc.make_main_remote)
-        production[*index[i], 0, 1, :] = np_from_ivec(alloc.make_aux_local)
-        production[*index[i], 1, 1, :] = np_from_ivec(alloc.make_aux_remote)
-        consumption[*index[i], 0, :] = np_from_ivec(alloc.take_local)
-        consumption[*index[i], 1, :] = np_from_ivec(alloc.take_remote)
-
-    return production, consumption, index
-
-
-def np_unallocated(
-    allocated: list[Allocated],
-    production: farray,
-    consumption: farray,
-    index: list[tuple[int, int]],
-) -> list[Allocated]:
+def allocated_from_state(state: SolverState) -> list[Allocated]:
     return [
-        alloc.__replace__(
-            take_local=ivec_from_np(consumption[*index[i], 0, :]),
-            take_remote=ivec_from_np(consumption[*index[i], 1, :]),
-            make_main_local=ivec_from_np(production[*index[i], 0, 0, :]),
-            make_main_remote=ivec_from_np(production[*index[i], 1, 0, :]),
-            make_aux_local=ivec_from_np(production[*index[i], 0, 1, :]),
-            make_aux_remote=ivec_from_np(production[*index[i], 1, 1, :]),
+        Allocated(
+            take_local=ivec_from_np(state.consumption[i, j, 0, :]),
+            take_remote=ivec_from_np(state.consumption[i, j, 1, :]),
+            make_main_local=ivec_from_np(state.production[i, j, 0, 0, :]),
+            make_main_remote=ivec_from_np(state.production[i, j, 1, 0, :]),
+            make_aux_local=ivec_from_np(state.production[i, j, 0, 1, :]),
+            make_aux_remote=ivec_from_np(state.production[i, j, 1, 1, :]),
+            flood_usage=0.0,
+            stable_usage=0.0,
+            is_infinite=False,
         )
-        for i, alloc in enumerate(allocated)
+        for i, j in state.index
     ]
 
 
@@ -2346,9 +2310,6 @@ def rounded_allocations(allocations: Sequence[Allocated]) -> list[Allocated]:
 
 @dataclass(frozen=True)
 class Allocated:
-    block: list[BuildingCount]
-    building: BuildingCount
-
     take_local: Ivec
     take_remote: Ivec
 
@@ -2360,22 +2321,6 @@ class Allocated:
     flood_usage: float
     stable_usage: float
     is_infinite: bool  # if all production are leaf items, we are never limited
-
-    @classmethod
-    def from_init(cls, block: list[BuildingCount], building: BuildingCount):
-        return cls(
-            block=block,
-            building=building,
-            take_local=izeros(),
-            take_remote=izeros(),
-            make_main_local=izeros(),
-            make_aux_local=izeros(),
-            make_main_remote=izeros(),
-            make_aux_remote=izeros(),
-            flood_usage=0.0,
-            stable_usage=0.0,
-            is_infinite=False,
-        )
 
     def take_total(self) -> Ivec:
         return isum([self.take_local, self.take_remote])
@@ -2421,17 +2366,34 @@ class SolverState:
     consumption: farray
 
 
-def solver_state_from_blocks(
-    blocks: list[list[BuildingCount]],
-) -> tuple[SolverState, list[Allocated]]:
-    allocated = [
-        Allocated.from_init(block=block, building=building)
-        for block in blocks
-        for building in block
-    ]
-    buildings = [alloc.building for alloc in allocated]
-    production, consumption, index = np_allocated(allocated)
-    return SolverState(buildings, index, production, consumption), allocated
+def solver_state_from_blocks(blocks: list[list[BuildingCount]]) -> SolverState:
+    B: Final = len(blocks)
+    N: Final = max(len(block) for block in blocks)
+    I: Final = len(Item)
+
+    # maps a flat building to its entry in production and consumption (first two indices)
+    index: list[tuple[int, int]] = []
+
+    # [block, building, local/remote, main/aux, item]
+    production = np.zeros([B, N, 2, 2, I])
+
+    # [block, building, local/remote, item]
+    consumption = np.zeros([B, N, 2, I])
+
+    buildings: list[BuildingCount] = []
+    for i, block in enumerate(blocks):
+        for j, building in enumerate(block):
+            index.append((i, j))
+            buildings.append(building)
+            # TODO for warmstart we need to set these
+            # production[*index[i], 0, 0, :] = np_from_ivec(alloc.make_main_local)
+            # production[*index[i], 1, 0, :] = np_from_ivec(alloc.make_main_remote)
+            # production[*index[i], 0, 1, :] = np_from_ivec(alloc.make_aux_local)
+            # production[*index[i], 1, 1, :] = np_from_ivec(alloc.make_aux_remote)
+            # consumption[*index[i], 0, :] = np_from_ivec(alloc.take_local)
+            # consumption[*index[i], 1, :] = np_from_ivec(alloc.take_remote)
+
+    return SolverState(buildings, index, production, consumption)
 
 
 @profile
@@ -2449,7 +2411,7 @@ def solver_update_state(
 
 def solve(blocks: list[list[BuildingCount]]) -> tuple[list[list[Allocated]], int]:
     prev_state = None
-    state, allocated = solver_state_from_blocks(blocks)
+    state = solver_state_from_blocks(blocks)
     flooded_state = state
     leaf_items: set[Item] = set()
 
@@ -2464,28 +2426,19 @@ def solve(blocks: list[list[BuildingCount]]) -> tuple[list[list[Allocated]], int
         count += 1
 
     # TODO we need that only in the very end, and/or if we make an accessor interface, we dont have to do that here anymore
-    flooded = np_unallocated(
-        allocated,
-        flooded_state.production,
-        flooded_state.consumption,
-        flooded_state.index,
-    )
+    flooded = allocated_from_state(flooded_state)
 
-    allocated = np_unallocated(
-        allocated, state.production, state.consumption, state.index
-    )
+    allocated = allocated_from_state(state)
 
     allocated = [
         alloc.__replace__(
-            flood_usage=alloc.building.usage_for(
-                flood.take_remote, flood.make_full_total()
-            ),
-            stable_usage=alloc.building.usage_for(
+            flood_usage=building.usage_for(flood.take_remote, flood.make_full_total()),
+            stable_usage=building.usage_for(
                 alloc.take_total(), alloc.make_full_total()
             ),
-            is_infinite=alloc.building.building.makes <= leaf_items,
+            is_infinite=building.building.makes <= leaf_items,
         )
-        for alloc, flood in zips(allocated, flooded)
+        for alloc, flood, building in zips(allocated, flooded, state.buildings)
     ]
 
     allocated = rounded_allocations(allocated)
