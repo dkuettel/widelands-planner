@@ -2046,63 +2046,6 @@ def full_production_from_allocated(allocated: list[Allocated]) -> Ivec:
     return isum(alloc.make_full_total() for alloc in allocated)
 
 
-def gen_flood_forward(
-    allocated: list[Allocated],
-) -> Generator[list[Allocated], None, list[Allocated]]:
-    prev_allocated = None
-
-    while not have_allocations_converged(prev_allocated, allocated):
-        prev_allocated = allocated
-
-        allocated = [alloc.flooded(alloc.take_total()) for alloc in allocated]
-        assert all(alloc.is_make_nonnegative() for alloc in allocated)
-
-        consumption = consumption_from_allocated(allocated)
-        production = full_production_from_allocated(allocated)
-
-        # TODO surplus = production.sub(consumption) -> could we vectorize or at least make it easier to understand?
-        for item in Item:
-            surplus = production[item] - consumption[item]
-            if surplus <= 0.0:
-                continue
-            demands = [
-                clipped(
-                    0.0, alloc.building.wants_ips(item) - alloc.take_total()[item], None
-                )
-                for alloc in allocated
-            ]
-            total_demand = sum(demands)
-            if total_demand <= 0.0:
-                continue
-            ratio = clipped(0.0, surplus / total_demand, 1.0)
-            allocated = [
-                alloc.__replace__(
-                    take_local=izeros(),
-                    take_remote=alloc.take_total().add(ifrom({item: demand * ratio})),
-                )
-                for alloc, demand in zips(allocated, demands)
-            ]
-            # TODO is it necessary here, or up one level?
-            allocated = [alloc.flooded(alloc.take_total()) for alloc in allocated]
-
-        assert all(alloc.is_make_nonnegative() for alloc in allocated)
-
-        # TODO this could be computed in one go above
-        # TODO hm usage for with limit for output, did we update the output?
-        allocated = [
-            alloc.__replace__(
-                flood_usage=alloc.building.usage_for(
-                    alloc.take_total(), alloc.make_full_total()
-                )
-            )
-            for alloc in allocated
-        ]
-
-        yield allocated
-
-    return allocated
-
-
 def np_flood_forward(state: SolverState) -> SolverState:
     index = state.index
 
@@ -2458,20 +2401,6 @@ class Allocated:
 
     def make_aux_total(self) -> Ivec:
         return isum([self.make_aux_local, self.make_aux_remote])
-
-    def flooded(self, take_total: Ivec) -> Allocated:
-        # main, aux = self.building.produces_ips(self.take_total())
-        main, aux = self.building.produces_ips(take_total)
-        return self.__replace__(
-            make_main_local=izeros(),
-            make_aux_local=izeros(),
-            make_main_remote=main,
-            make_aux_remote=aux,
-        )
-
-    def is_make_nonnegative(self) -> bool:
-        total = self.make_full_total()
-        return total.is_nonnegative()
 
     def rounded(self, eps: float) -> Allocated:
         return self.__replace__(
