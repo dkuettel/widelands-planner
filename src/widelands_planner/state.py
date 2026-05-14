@@ -2098,10 +2098,13 @@ def gen_flood_forward(
     return allocated
 
 
-def np_flood_forward(allocated: list[Allocated]) -> list[Allocated]:
-    production, consumption, index = np_allocated(allocated)
-
-    aproduction = np.sum(production, axis=(2, 3))
+def np_flood_forward(
+    allocated: list[Allocated],
+    production: farray,
+    consumption: farray,
+    index: list[tuple[int, int]],
+) -> tuple[farray, farray]:
+    aproduction = np.sum(production, axis=2)
     last_aproduction = None
 
     aconsumption = np.sum(consumption, axis=2)
@@ -2125,7 +2128,7 @@ def np_flood_forward(allocated: list[Allocated]) -> list[Allocated]:
         last_aconsumption = aconsumption
         last_aproduction = aproduction
 
-        total_production = np.sum(aproduction, axis=(0, 1))
+        total_production = np.sum(aproduction, axis=(0, 1, 2))
         total_consumption = np.sum(aconsumption, axis=(0, 1))
         surplus = (total_production - total_consumption).clip(0.0, None)
         demands = (wants - aconsumption).clip(0.0, None)
@@ -2145,30 +2148,28 @@ def np_flood_forward(allocated: list[Allocated]) -> list[Allocated]:
             if last_last_aconsumption is not None and np.all(
                 last_last_aconsumption[*ii, :] == aconsumption[*ii, :]
             ):
-                return aproduction[*ii, :]
+                # TODO or return nothing and initialize aproduction with old data?
+                return aproduction[*ii, :, :]
             return alloc.np_flooded(aconsumption[*ii, :])
 
         aproduction = np.zeros_like(aproduction)
         for i, alloc in enumerate(allocated):
-            aproduction[*index[i], :] = maybe_flood(i, alloc)
+            aproduction[*index[i], :, :] = maybe_flood(i, alloc)
 
         count += 1
 
-    # TODO that is still old style now
-    allocated = [
-        alloc.__replace__(
-            take_local=izeros(),
-            take_remote=ivec_from_np(aconsumption[*index[i], :]),
-        )
-        for i, alloc in enumerate(allocated)
-    ]
+    consumption[:, :, 0, :] = 0.0
+    consumption[:, :, 1, :] = aconsumption
 
-    # TODO that is still old style now
-    allocated = [alloc.flooded(alloc.take_total()) for alloc in allocated]
+    production[:, :, 0, :, :] = 0.0
+    # TODO not sure why we cant use aproduction from the last iteration here
+    # production[:, :, 1, :, :] = aproduction
+    for i, alloc in enumerate(allocated):
+        production[*index[i], 1, :, :] = alloc.np_flooded(aconsumption[*index[i], :])
 
     print(f"{count} flooding iterations")
 
-    return allocated
+    return production, consumption
 
 
 def np_allocated(
@@ -2225,9 +2226,10 @@ def np_unallocated(
     ]
 
 
-def np_prefer_local(allocated: list[Allocated]) -> list[Allocated]:
-    production, consumption, index = np_allocated(allocated)
-
+def np_prefer_local(
+    production: farray,
+    consumption: farray,
+) -> tuple[farray, farray]:
     anywhere_production = np.sum(production, axis=2)
     anywhere_consumption = np.sum(consumption, axis=2)
 
@@ -2264,7 +2266,7 @@ def np_prefer_local(allocated: list[Allocated]) -> list[Allocated]:
         axis=2,
     )
 
-    return np_unallocated(allocated, production, consumption, index)
+    return production, consumption
 
 
 def np_back_reallocated(
@@ -2277,9 +2279,12 @@ def np_back_reallocated(
     return remote_consumption, local_consumption
 
 
-def np_back_pressure(allocated: list[Allocated]) -> list[Allocated]:
-    production, consumption, index = np_allocated(allocated)
-
+def np_back_pressure(
+    allocated: list[Allocated],
+    production: farray,
+    consumption: farray,
+    index: list[tuple[int, int]],
+) -> tuple[farray, farray, set[Item]]:
     last_production = None
     last_consumption = None
 
@@ -2366,19 +2371,9 @@ def np_back_pressure(allocated: list[Allocated]) -> list[Allocated]:
 
         count += 1
 
-    # TODO mhh does aux even change?
-    allocated = np_unallocated(allocated, production, consumption, index)
-
-    allocated = [
-        alloc.__replace__(
-            is_infinite=alloc.building.building.makes <= leaf_items,
-        )
-        for alloc in allocated
-    ]
-
     print(f" {count} pressure iterations")
 
-    return allocated
+    return production, consumption, leaf_items
 
 
 # TODO a value here that is lower will make it much faster too
@@ -2475,7 +2470,8 @@ class Allocated:
 
     def np_flooded(self, take_total: farray) -> farray:
         main, aux = self.building.np_produces_ips(take_total)
-        return main + aux
+        return np.stack([main, aux])
+        # return main + aux
 
     def is_make_nonnegative(self) -> bool:
         total = self.make_full_total()
@@ -2505,14 +2501,28 @@ def solver_update_state(
     allocated: list[Allocated],
 ) -> tuple[list[Allocated], list[Allocated]]:
     # TODO actually we should look at warmstarting, most of the time you just change one count or building!
-    # TODO we could now think about numpy all the way? so we dont have to switch repr all the time? getting into a speed that is okay enough probably
-    # if we do that, and in fact we dont need local vs remote for the main part, then its just one big matrix, no blocks?
-    # ah no, we need the local vs remote for the correct backpressure
-    flooded = np_flood_forward(allocated)
-    # TODO we could maybe build that into flood_forward eventually? and/or, is it needed except for the last step? is the idea that we actually do it globally and then just cosmetically do local? then also back pressure can be a bit easier
-    # I think that should still give the same solution, but we might want to think about if that is the solution we believe in for what the game is doing
-    allocated = np_prefer_local(flooded)
-    allocated = np_back_pressure(allocated)
+
+    production, consumption, index = np_allocated(allocated)
+    production, consumption = np_flood_forward(
+        allocated, production, consumption, index
+    )
+    # TODO we need that only in the very end, and/or if we make an accessor interface, we dont have to do that here anymore
+    flooded = np_unallocated(allocated, production, consumption, index)
+
+    production, consumption = np_prefer_local(production, consumption)
+
+    production, consumption, leaf_items = np_back_pressure(
+        allocated, production, consumption, index
+    )
+
+    allocated = np_unallocated(allocated, production, consumption, index)
+    allocated = [
+        alloc.__replace__(
+            is_infinite=alloc.building.building.makes <= leaf_items,
+        )
+        for alloc in allocated
+    ]
+
     return allocated, flooded
 
 
