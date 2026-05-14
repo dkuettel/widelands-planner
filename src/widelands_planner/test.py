@@ -5,6 +5,8 @@ import time
 from cProfile import Profile
 from pathlib import Path
 
+import numpy as np
+
 from widelands_planner.state import (
     Block,
     Bname,
@@ -14,6 +16,9 @@ from widelands_planner.state import (
     building_from_name,
     get_buildings,
     have_allocations_converged,
+    ips_eps,
+    np_allocated,
+    np_unallocated,
     print_block,
     rounded_allocations,
     solver_has_converged,
@@ -494,14 +499,38 @@ def bench():
     blocks = setup7()
 
     dt = time.perf_counter_ns()
-    prev = None
     count = 0
     state = solver_state_from_blocks(blocks)
+    last_production = None
+    last_consumption = None
+    production, consumption, index = np_allocated(state)
+    flooded_production = production
+    flooded_consumption = consumption
     flooded = state
+    leaf_items: set[Item] = set()
     # with Profile() as p:
-    while not solver_has_converged(prev, state):
-        prev, (state, flooded) = state, solver_update_state(state)
+    while (
+        last_production is None
+        or last_consumption is None
+        or np.any(np.abs(last_production - production) > ips_eps)
+        or np.any(np.abs(last_consumption - consumption) > ips_eps)
+    ):
+        # TODO these copies seem needed, clean up reuse
+        last_production = production.copy()
+        last_consumption = consumption.copy()
+        (
+            state,
+            production,
+            consumption,
+            index,
+            leaf_items,
+            flooded_production,
+            flooded_consumption,
+        ) = solver_update_state(state, production, consumption, index)
         count += 1
+    # TODO we need that only in the very end, and/or if we make an accessor interface, we dont have to do that here anymore
+    flooded = np_unallocated(state, flooded_production, flooded_consumption, index)
+    state = np_unallocated(state, production, consumption, index)
     state = [
         alloc.__replace__(
             flood_usage=alloc.building.usage_for(
@@ -510,6 +539,7 @@ def bench():
             stable_usage=alloc.building.usage_for(
                 alloc.take_total(), alloc.make_full_total()
             ),
+            is_infinite=alloc.building.building.makes <= leaf_items,
         )
         for alloc, flood in zips(state, flooded)
     ]

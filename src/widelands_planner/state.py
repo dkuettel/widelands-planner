@@ -2218,7 +2218,6 @@ def np_unallocated(
             take_remote=ivec_from_np(consumption[*index[i], 1, :]),
             make_main_local=ivec_from_np(production[*index[i], 0, 0, :]),
             make_main_remote=ivec_from_np(production[*index[i], 1, 0, :]),
-            # TODO mhh does aux even change?
             make_aux_local=ivec_from_np(production[*index[i], 0, 1, :]),
             make_aux_remote=ivec_from_np(production[*index[i], 1, 1, :]),
         )
@@ -2288,9 +2287,9 @@ def np_back_pressure(
     last_production = None
     last_consumption = None
 
-    # TODO ok to do it only once, correct i think, but not the same as the old version
+    # TODO always the same
     leaf_items = set(Item) - {
-        item for alloc in allocated for item in alloc.take_total().nonzero_items()
+        item for alloc in allocated for item in alloc.building.building.takes
     }
     leaves = np_from_ivec(ifrom({i: 1.0 for i in leaf_items})) > 0
 
@@ -2499,58 +2498,45 @@ def solver_state_from_blocks(blocks: list[Block]) -> list[Allocated]:
 @profile
 def solver_update_state(
     allocated: list[Allocated],
-) -> tuple[list[Allocated], list[Allocated]]:
+    production: farray,
+    consumption: farray,
+    index: list[tuple[int, int]],
+) -> tuple[
+    list[Allocated],
+    farray,
+    farray,
+    list[tuple[int, int]],
+    set[Item],
+    farray,
+    farray,
+]:
     # TODO actually we should look at warmstarting, most of the time you just change one count or building!
 
-    production, consumption, index = np_allocated(allocated)
-    production, consumption = np_flood_forward(
+    flooded_production, flooded_consumption = np_flood_forward(
         allocated, production, consumption, index
     )
-    # TODO we need that only in the very end, and/or if we make an accessor interface, we dont have to do that here anymore
-    flooded = np_unallocated(allocated, production, consumption, index)
 
-    production, consumption = np_prefer_local(production, consumption)
+    production, consumption = np_prefer_local(flooded_production, flooded_consumption)
 
     production, consumption, leaf_items = np_back_pressure(
         allocated, production, consumption, index
     )
 
-    allocated = np_unallocated(allocated, production, consumption, index)
-    allocated = [
-        alloc.__replace__(
-            is_infinite=alloc.building.building.makes <= leaf_items,
-        )
-        for alloc in allocated
-    ]
-
-    return allocated, flooded
+    return (
+        allocated,
+        production,
+        consumption,
+        index,
+        leaf_items,
+        flooded_production,
+        flooded_consumption,
+    )
 
 
 def solver_has_converged(
     prev: None | list[Allocated], allocated: list[Allocated]
 ) -> bool:
     return have_allocations_converged(prev, allocated)
-
-
-def profile_fixpoint(blocks: list[Block]) -> tuple[str, list[list[Allocated]]]:
-    with Profile() as p:
-        result = fixpoint(blocks)
-
-    now = datetime.now()
-    path = Path(f"./profiles/test-{now.isoformat()}.prof")
-    path.parent.mkdir(exist_ok=True, parents=True)
-
-    # NOTE uv run tool tuna file.prof
-    # TODO results seem strange, is tuna broken? in cli i see more
-    # maybe run this in isolation, outside of streamlit
-    # hmm or maybe run a second time? or need to reload in tuna?
-    p.dump_stats(path)
-
-    link = Path("./profiles/latest")
-    link.unlink(missing_ok=True)
-    link.symlink_to(path.name)
-
-    return result
 
 
 # def pyinstrument_fixpoint(blocks: list[Block]) -> tuple[str, list[list[Allocated]]]:
