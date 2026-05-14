@@ -2099,37 +2099,37 @@ def gen_flood_forward(
 
 
 def np_flood_forward(allocated: list[Allocated]) -> list[Allocated]:
-    last_consumption = None
-    consumption = np.stack([np_from_ivec(alloc.take_total()) for alloc in allocated])
-    last_production = None
-    production = np.stack(
-        [np_from_ivec(alloc.make_full_total()) for alloc in allocated]
-    )
+    production, consumption, index = np_allocated(allocated)
 
-    wants = np.array(
-        [[alloc.building.wants_ips(item) for item in Item] for alloc in allocated]
-    )
+    aproduction = np.sum(production, axis=(2, 3))
+    last_aproduction = None
+
+    aconsumption = np.sum(consumption, axis=2)
+    last_aconsumption = None
+
+    wants = np.zeros_like(aconsumption)
+    for i, alloc in enumerate(allocated):
+        wants[*index[i], :] = [alloc.building.wants_ips(item) for item in Item]
 
     count = 0
 
     while (
-        last_consumption is None
-        or last_production is None
+        last_aconsumption is None
+        or last_aproduction is None
         or (
-            np.any(np.abs(last_consumption - consumption) > ips_eps)
-            or np.any(np.abs(last_production - production) > ips_eps)
+            np.any(np.abs(last_aconsumption - aconsumption) > ips_eps)
+            or np.any(np.abs(last_aproduction - aproduction) > ips_eps)
         )
     ):
-        last_last_consumption = last_consumption
-        last_consumption = consumption
-        last_production = production
+        last_last_aconsumption = last_aconsumption
+        last_aconsumption = aconsumption
+        last_aproduction = aproduction
 
-        total_consumption = np.sum(consumption, axis=0)
-        total_production = np.sum(production, axis=0)
-
+        total_production = np.sum(aproduction, axis=(0, 1))
+        total_consumption = np.sum(aconsumption, axis=(0, 1))
         surplus = (total_production - total_consumption).clip(0.0, None)
-        demands = (wants - consumption).clip(0.0, None)
-        total_demands = np.sum(demands, axis=0)
+        demands = (wants - aconsumption).clip(0.0, None)
+        total_demands = np.sum(demands, axis=(0, 1))
         ratios = np.divide(
             surplus,
             total_demands,
@@ -2137,65 +2137,33 @@ def np_flood_forward(allocated: list[Allocated]) -> list[Allocated]:
             out=np.full_like(total_demands, 0.0),
         ).clip(0.0, 1.0)
 
-        consumption = consumption + demands * ratios[None, :]
+        aconsumption = aconsumption + demands * ratios[None, None, :]
 
         def maybe_flood(i: int, alloc: Allocated) -> farray:
-            # TODO this could be vectorized then
-            if last_last_consumption is not None and np.all(
-                last_last_consumption[i, :] == consumption[i, :]
+            ii = index[i]
+            # TODO this could be vectorized then? we should actually cheaply know from above what might have changed
+            if last_last_aconsumption is not None and np.all(
+                last_last_aconsumption[*ii, :] == aconsumption[*ii, :]
             ):
-                return production[i, :]
-            return alloc.np_flooded(consumption[i, :])
+                return aproduction[*ii, :]
+            return alloc.np_flooded(aconsumption[*ii, :])
 
-        # TODO this and the other allocate_ips based things are now the heaviest
-        # they kinda are easy to parallelize, with forking, thats one option
-        # or maybe they can just be made more efficient?
-        production = np.stack(
-            [maybe_flood(i, alloc) for i, alloc in enumerate(allocated)]
-        )
-
-        # TODO threading might work because numpy releases the gil?
-        # maybe keep the pool alive between iterations? also not helping
-        # seems the overhead is too high
-        # with ThreadPoolExecutor() as pool:
-        #     production = np.stack(
-        #         list(pool.map(maybe_flood, range(len(allocated)), allocated))
-        #     )
-
-        # TODO correct, but slow, we really need forking for the cheapness
-        # or maybe use threading and fork at the allocate_ips point?
-        # or strip most my dataclasses again of their methods? and then we can control much better what we run? can we?
-        # TODO could also switch to 32 or 16 bit? probably using 64 now everywhere
-        # with ProcessPoolExecutor() as pool:
-        #     production = np.stack(list(pool.map(run_flooded, allocated, consumption)))
-
-        # TODO this could be computed in one go above
-        # TODO hm usage for with limit for output, did we update the output?
-        # allocated = [
-        #     alloc.__replace__(
-        #         # TODO we actually only need that for the last iteration ... and its expensive
-        #         # or we compute it only on demand based on the solution
-        #         # flood_usage=alloc.building.usage_for(
-        #         #     alloc.take_remote, alloc.make_full_total()
-        #         # )
-        #     )
-        #     for alloc in allocated
-        # ]
+        aproduction = np.zeros_like(aproduction)
+        for i, alloc in enumerate(allocated):
+            aproduction[*index[i], :] = maybe_flood(i, alloc)
 
         count += 1
 
+    # TODO that is still old style now
     allocated = [
         alloc.__replace__(
             take_local=izeros(),
-            take_remote=ivec_from_np(consumption[i, :]),
-            # make_main_local=izeros(),
-            # make_aux_local=izeros(),
-            # make_main_remote=main,
-            # make_aux_remote=aux,
+            take_remote=ivec_from_np(aconsumption[*index[i], :]),
         )
         for i, alloc in enumerate(allocated)
     ]
 
+    # TODO that is still old style now
     allocated = [alloc.flooded(alloc.take_total()) for alloc in allocated]
 
     print(f"{count} flooding iterations")
@@ -2203,7 +2171,9 @@ def np_flood_forward(allocated: list[Allocated]) -> list[Allocated]:
     return allocated
 
 
-def np_prefer_local(allocated: list[Allocated]) -> list[Allocated]:
+def np_allocated(
+    allocated: list[Allocated],
+) -> tuple[farray, farray, list[tuple[int, int]]]:
     block_ids = list({id(alloc.block) for alloc in allocated})
 
     B: Final = len(block_ids)
@@ -2231,6 +2201,32 @@ def np_prefer_local(allocated: list[Allocated]) -> list[Allocated]:
         production[*index[i], 1, 1, :] = np_from_ivec(alloc.make_aux_remote)
         consumption[*index[i], 0, :] = np_from_ivec(alloc.take_local)
         consumption[*index[i], 1, :] = np_from_ivec(alloc.take_remote)
+
+    return production, consumption, index
+
+
+def np_unallocated(
+    allocated: list[Allocated],
+    production: farray,
+    consumption: farray,
+    index: list[tuple[int, int]],
+) -> list[Allocated]:
+    return [
+        alloc.__replace__(
+            take_local=ivec_from_np(consumption[*index[i], 0, :]),
+            take_remote=ivec_from_np(consumption[*index[i], 1, :]),
+            make_main_local=ivec_from_np(production[*index[i], 0, 0, :]),
+            make_main_remote=ivec_from_np(production[*index[i], 1, 0, :]),
+            # TODO mhh does aux even change?
+            make_aux_local=ivec_from_np(production[*index[i], 0, 1, :]),
+            make_aux_remote=ivec_from_np(production[*index[i], 1, 1, :]),
+        )
+        for i, alloc in enumerate(allocated)
+    ]
+
+
+def np_prefer_local(allocated: list[Allocated]) -> list[Allocated]:
+    production, consumption, index = np_allocated(allocated)
 
     anywhere_production = np.sum(production, axis=2)
     anywhere_consumption = np.sum(consumption, axis=2)
@@ -2268,18 +2264,7 @@ def np_prefer_local(allocated: list[Allocated]) -> list[Allocated]:
         axis=2,
     )
 
-    return [
-        alloc.__replace__(
-            take_local=ivec_from_np(consumption[*index[i], 0, :]),
-            take_remote=ivec_from_np(consumption[*index[i], 1, :]),
-            make_main_local=ivec_from_np(production[*index[i], 0, 0, :]),
-            make_main_remote=ivec_from_np(production[*index[i], 1, 0, :]),
-            # TODO mhh does aux even change?
-            make_aux_local=ivec_from_np(production[*index[i], 0, 1, :]),
-            make_aux_remote=ivec_from_np(production[*index[i], 1, 1, :]),
-        )
-        for i, alloc in enumerate(allocated)
-    ]
+    return np_unallocated(allocated, production, consumption, index)
 
 
 def np_back_reallocated(
