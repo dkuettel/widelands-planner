@@ -2379,7 +2379,7 @@ def np_back_pressure(state: SolverState) -> tuple[SolverState, set[Item]]:
 
 # TODO a value here that is lower will make it much faster too
 # best would be something that is within percent ranges, because this is what you really see
-ips_eps: Final = 0.01 / 5 / 60
+ips_eps: Final = 0.01 / 4 / 60
 
 
 # TODO assumes those two are parallel and zip
