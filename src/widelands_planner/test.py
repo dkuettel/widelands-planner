@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import pickle
 import time
+from copy import deepcopy
 from cProfile import Profile
 from pathlib import Path
 
@@ -500,38 +501,36 @@ def bench():
 
     dt = time.perf_counter_ns()
     count = 0
-    state = solver_state_from_blocks(blocks)
-    last_production = None
-    last_consumption = None
-    production, consumption, index = np_allocated(state)
-    flooded_production = production
-    flooded_consumption = consumption
-    flooded = state
+
+    prev_state = None
+    state, allocated = solver_state_from_blocks(blocks)
+    flooded_state = state
     leaf_items: set[Item] = set()
+
     # with Profile() as p:
+
     while (
-        last_production is None
-        or last_consumption is None
-        or np.any(np.abs(last_production - production) > ips_eps)
-        or np.any(np.abs(last_consumption - consumption) > ips_eps)
+        prev_state is None
+        or np.any(np.abs(prev_state.production - state.production) > ips_eps)
+        or np.any(np.abs(prev_state.consumption - state.consumption) > ips_eps)
     ):
-        # TODO these copies seem needed, clean up reuse
-        last_production = production.copy()
-        last_consumption = consumption.copy()
-        (
-            state,
-            production,
-            consumption,
-            index,
-            leaf_items,
-            flooded_production,
-            flooded_consumption,
-        ) = solver_update_state(state, production, consumption, index)
+        prev_state = state
+        state, flooded_state, leaf_items = solver_update_state(state)
         count += 1
+
     # TODO we need that only in the very end, and/or if we make an accessor interface, we dont have to do that here anymore
-    flooded = np_unallocated(state, flooded_production, flooded_consumption, index)
-    state = np_unallocated(state, production, consumption, index)
-    state = [
+    flooded = np_unallocated(
+        allocated,
+        flooded_state.production,
+        flooded_state.consumption,
+        flooded_state.index,
+    )
+
+    allocated = np_unallocated(
+        allocated, state.production, state.consumption, state.index
+    )
+
+    allocated = [
         alloc.__replace__(
             flood_usage=alloc.building.usage_for(
                 flood.take_remote, flood.make_full_total()
@@ -541,9 +540,11 @@ def bench():
             ),
             is_infinite=alloc.building.building.makes <= leaf_items,
         )
-        for alloc, flood in zips(state, flooded)
+        for alloc, flood in zips(allocated, flooded)
     ]
-    allocated = rounded_allocations(state)
+
+    allocated = rounded_allocations(allocated)
+
     # p.dump_stats("data.prof")
     dt = time.perf_counter_ns() - dt
     print(f"{count} iterations in {round(dt / 1e6)}ms")

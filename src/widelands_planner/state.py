@@ -1179,6 +1179,11 @@ class BuildingCount:
         main, aux = self.building.np_produces_ips(allocation / self.count)
         return main * self.count, aux * self.count
 
+    def np_flooded(self, take_total: farray) -> farray:
+        main, aux = self.np_produces_ips(take_total)
+        return np.stack([main, aux])
+        # return main + aux
+
     def wants_ips(self, item: Item) -> float:
         match self.wants.get(item, None):
             case None:
@@ -2098,21 +2103,18 @@ def gen_flood_forward(
     return allocated
 
 
-def np_flood_forward(
-    allocated: list[Allocated],
-    production: farray,
-    consumption: farray,
-    index: list[tuple[int, int]],
-) -> tuple[farray, farray]:
-    aproduction = np.sum(production, axis=2)
+def np_flood_forward(state: SolverState) -> SolverState:
+    index = state.index
+
+    aproduction = np.sum(state.production, axis=2)
     last_aproduction = None
 
-    aconsumption = np.sum(consumption, axis=2)
+    aconsumption = np.sum(state.consumption, axis=2)
     last_aconsumption = None
 
     wants = np.zeros_like(aconsumption)
-    for i, alloc in enumerate(allocated):
-        wants[*index[i], :] = [alloc.building.wants_ips(item) for item in Item]
+    for i, b in enumerate(state.buildings):
+        wants[*index[i], :] = [b.wants_ips(item) for item in Item]
 
     count = 0
 
@@ -2142,7 +2144,7 @@ def np_flood_forward(
 
         aconsumption = aconsumption + demands * ratios[None, None, :]
 
-        def maybe_flood(i: int, alloc: Allocated) -> farray:
+        def maybe_flood(i: int, b: BuildingCount) -> farray:
             ii = index[i]
             # TODO this could be vectorized then? we should actually cheaply know from above what might have changed
             if last_last_aconsumption is not None and np.all(
@@ -2150,26 +2152,28 @@ def np_flood_forward(
             ):
                 # TODO or return nothing and initialize aproduction with old data?
                 return aproduction[*ii, :, :]
-            return alloc.np_flooded(aconsumption[*ii, :])
+            return b.np_flooded(aconsumption[*ii, :])
 
         aproduction = np.zeros_like(aproduction)
-        for i, alloc in enumerate(allocated):
-            aproduction[*index[i], :, :] = maybe_flood(i, alloc)
+        for i, b in enumerate(state.buildings):
+            aproduction[*index[i], :, :] = maybe_flood(i, b)
 
         count += 1
 
+    consumption = state.consumption.copy()
     consumption[:, :, 0, :] = 0.0
     consumption[:, :, 1, :] = aconsumption
 
+    production = state.production.copy()
     production[:, :, 0, :, :] = 0.0
     # TODO not sure why we cant use aproduction from the last iteration here
     # production[:, :, 1, :, :] = aproduction
-    for i, alloc in enumerate(allocated):
-        production[*index[i], 1, :, :] = alloc.np_flooded(aconsumption[*index[i], :])
+    for i, b in enumerate(state.buildings):
+        production[*index[i], 1, :, :] = b.np_flooded(aconsumption[*index[i], :])
 
     print(f"{count} flooding iterations")
 
-    return production, consumption
+    return SolverState(state.buildings, index, production, consumption)
 
 
 def np_allocated(
@@ -2225,12 +2229,9 @@ def np_unallocated(
     ]
 
 
-def np_prefer_local(
-    production: farray,
-    consumption: farray,
-) -> tuple[farray, farray]:
-    anywhere_production = np.sum(production, axis=2)
-    anywhere_consumption = np.sum(consumption, axis=2)
+def np_prefer_local(state: SolverState) -> SolverState:
+    anywhere_production = np.sum(state.production, axis=2)
+    anywhere_consumption = np.sum(state.consumption, axis=2)
 
     block_production = np.sum(anywhere_production, axis=(1, 2))
     block_consumption = np.sum(anywhere_consumption, axis=1)
@@ -2265,7 +2266,7 @@ def np_prefer_local(
         axis=2,
     )
 
-    return production, consumption
+    return SolverState(state.buildings, state.index, production, consumption)
 
 
 def np_back_reallocated(
@@ -2278,18 +2279,17 @@ def np_back_reallocated(
     return remote_consumption, local_consumption
 
 
-def np_back_pressure(
-    allocated: list[Allocated],
-    production: farray,
-    consumption: farray,
-    index: list[tuple[int, int]],
-) -> tuple[farray, farray, set[Item]]:
+def np_back_pressure(state: SolverState) -> tuple[SolverState, set[Item]]:
     last_production = None
     last_consumption = None
 
+    index = state.index
+    production = state.production.copy()
+    consumption = state.consumption.copy()
+
     # TODO always the same
     leaf_items = set(Item) - {
-        item for alloc in allocated for item in alloc.building.building.takes
+        item for b in state.buildings for item in b.building.takes
     }
     leaves = np_from_ivec(ifrom({i: 1.0 for i in leaf_items})) > 0
 
@@ -2339,7 +2339,7 @@ def np_back_pressure(
             production[:, :, 1, 0, :] * global_keep_ratio[None, None, :]
         )
 
-        for i, alloc in enumerate(allocated):
+        for i, b in enumerate(state.buildings):
             # TODO this can be done cheaper now
             # TODO why last_last? might be suboptimal, try when everything else is fine again
             if (
@@ -2355,7 +2355,7 @@ def np_back_pressure(
                 )
             ):
                 continue
-            new_consumption = alloc.building.np_back_pressure(
+            new_consumption = b.np_back_pressure(
                 np.sum(consumption[*index[i], :, :], axis=0),
                 # TODO hm should we pass aux as limit?
                 np.sum(production[*index[i], :, :, :], axis=(0, 1)),
@@ -2372,7 +2372,9 @@ def np_back_pressure(
 
     print(f" {count} pressure iterations")
 
-    return production, consumption, leaf_items
+    return SolverState(
+        state.buildings, state.index, production, consumption
+    ), leaf_items
 
 
 # TODO a value here that is lower will make it much faster too
@@ -2467,11 +2469,6 @@ class Allocated:
             make_aux_remote=aux,
         )
 
-    def np_flooded(self, take_total: farray) -> farray:
-        main, aux = self.building.np_produces_ips(take_total)
-        return np.stack([main, aux])
-        # return main + aux
-
     def is_make_nonnegative(self) -> bool:
         total = self.make_full_total()
         return total.is_nonnegative()
@@ -2487,50 +2484,38 @@ class Allocated:
         )
 
 
-def solver_state_from_blocks(blocks: list[Block]) -> list[Allocated]:
-    return [
+@dataclass(frozen=True)
+class SolverState:
+    buildings: list[BuildingCount]
+    index: list[tuple[int, int]]
+    production: farray
+    consumption: farray
+
+
+def solver_state_from_blocks(
+    blocks: list[Block],
+) -> tuple[SolverState, list[Allocated]]:
+    allocated = [
         Allocated.from_init(block=block, building=building)
         for block in blocks
         for building in block.buildings
     ]
+    buildings = [alloc.building for alloc in allocated]
+    production, consumption, index = np_allocated(allocated)
+    return SolverState(buildings, index, production, consumption), allocated
 
 
 @profile
 def solver_update_state(
-    allocated: list[Allocated],
-    production: farray,
-    consumption: farray,
-    index: list[tuple[int, int]],
-) -> tuple[
-    list[Allocated],
-    farray,
-    farray,
-    list[tuple[int, int]],
-    set[Item],
-    farray,
-    farray,
-]:
+    state: SolverState,
+) -> tuple[SolverState, SolverState, set[Item]]:
     # TODO actually we should look at warmstarting, most of the time you just change one count or building!
 
-    flooded_production, flooded_consumption = np_flood_forward(
-        allocated, production, consumption, index
-    )
+    flooded_state = np_flood_forward(state)
+    state = np_prefer_local(flooded_state)
+    state, leaf_items = np_back_pressure(state)
 
-    production, consumption = np_prefer_local(flooded_production, flooded_consumption)
-
-    production, consumption, leaf_items = np_back_pressure(
-        allocated, production, consumption, index
-    )
-
-    return (
-        allocated,
-        production,
-        consumption,
-        index,
-        leaf_items,
-        flooded_production,
-        flooded_consumption,
-    )
+    return state, flooded_state, leaf_items
 
 
 def solver_has_converged(
