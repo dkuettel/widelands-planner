@@ -2447,6 +2447,52 @@ def solver_update_state(
     return state, flooded_state, leaf_items
 
 
+def solve(blocks: list[Block]) -> tuple[list[Allocated], int]:
+    prev_state = None
+    state, allocated = solver_state_from_blocks(blocks)
+    flooded_state = state
+    leaf_items: set[Item] = set()
+
+    count = 0
+    while (
+        prev_state is None
+        or np.any(np.abs(prev_state.production - state.production) > ips_eps)
+        or np.any(np.abs(prev_state.consumption - state.consumption) > ips_eps)
+    ):
+        prev_state = state
+        state, flooded_state, leaf_items = solver_update_state(state)
+        count += 1
+
+    # TODO we need that only in the very end, and/or if we make an accessor interface, we dont have to do that here anymore
+    flooded = np_unallocated(
+        allocated,
+        flooded_state.production,
+        flooded_state.consumption,
+        flooded_state.index,
+    )
+
+    allocated = np_unallocated(
+        allocated, state.production, state.consumption, state.index
+    )
+
+    allocated = [
+        alloc.__replace__(
+            flood_usage=alloc.building.usage_for(
+                flood.take_remote, flood.make_full_total()
+            ),
+            stable_usage=alloc.building.usage_for(
+                alloc.take_total(), alloc.make_full_total()
+            ),
+            is_infinite=alloc.building.building.makes <= leaf_items,
+        )
+        for alloc, flood in zips(allocated, flooded)
+    ]
+
+    allocated = rounded_allocations(allocated)
+
+    return allocated, count
+
+
 def solver_has_converged(
     prev: None | list[Allocated], allocated: list[Allocated]
 ) -> bool:

@@ -22,6 +22,7 @@ from widelands_planner.state import (
     np_unallocated,
     print_block,
     rounded_allocations,
+    solve,
     solver_has_converged,
     solver_state_from_blocks,
     solver_update_state,
@@ -500,50 +501,7 @@ def bench():
     blocks = setup7()
 
     dt = time.perf_counter_ns()
-    count = 0
-
-    prev_state = None
-    state, allocated = solver_state_from_blocks(blocks)
-    flooded_state = state
-    leaf_items: set[Item] = set()
-
-    # with Profile() as p:
-
-    while (
-        prev_state is None
-        or np.any(np.abs(prev_state.production - state.production) > ips_eps)
-        or np.any(np.abs(prev_state.consumption - state.consumption) > ips_eps)
-    ):
-        prev_state = state
-        state, flooded_state, leaf_items = solver_update_state(state)
-        count += 1
-
-    # TODO we need that only in the very end, and/or if we make an accessor interface, we dont have to do that here anymore
-    flooded = np_unallocated(
-        allocated,
-        flooded_state.production,
-        flooded_state.consumption,
-        flooded_state.index,
-    )
-
-    allocated = np_unallocated(
-        allocated, state.production, state.consumption, state.index
-    )
-
-    allocated = [
-        alloc.__replace__(
-            flood_usage=alloc.building.usage_for(
-                flood.take_remote, flood.make_full_total()
-            ),
-            stable_usage=alloc.building.usage_for(
-                alloc.take_total(), alloc.make_full_total()
-            ),
-            is_infinite=alloc.building.building.makes <= leaf_items,
-        )
-        for alloc, flood in zips(allocated, flooded)
-    ]
-
-    allocated = rounded_allocations(allocated)
+    allocated, count = solve(blocks)
 
     # p.dump_stats("data.prof")
     dt = time.perf_counter_ns() - dt
