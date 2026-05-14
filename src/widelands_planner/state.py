@@ -2346,7 +2346,7 @@ def rounded_allocations(allocations: Sequence[Allocated]) -> list[Allocated]:
 
 @dataclass(frozen=True)
 class Allocated:
-    block: Block
+    block: list[BuildingCount]
     building: BuildingCount
 
     take_local: Ivec
@@ -2362,7 +2362,7 @@ class Allocated:
     is_infinite: bool  # if all production are leaf items, we are never limited
 
     @classmethod
-    def from_init(cls, block: Block, building: BuildingCount):
+    def from_init(cls, block: list[BuildingCount], building: BuildingCount):
         return cls(
             block=block,
             building=building,
@@ -2422,12 +2422,12 @@ class SolverState:
 
 
 def solver_state_from_blocks(
-    blocks: list[Block],
+    blocks: list[list[BuildingCount]],
 ) -> tuple[SolverState, list[Allocated]]:
     allocated = [
         Allocated.from_init(block=block, building=building)
         for block in blocks
-        for building in block.buildings
+        for building in block
     ]
     buildings = [alloc.building for alloc in allocated]
     production, consumption, index = np_allocated(allocated)
@@ -2447,7 +2447,7 @@ def solver_update_state(
     return state, flooded_state, leaf_items
 
 
-def solve(blocks: list[Block]) -> tuple[list[list[Allocated]], int]:
+def solve(blocks: list[list[BuildingCount]]) -> tuple[list[list[Allocated]], int]:
     prev_state = None
     state, allocated = solver_state_from_blocks(blocks)
     flooded_state = state

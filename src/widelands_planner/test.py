@@ -413,68 +413,54 @@ def setup6() -> list[Block]:
     return [block]
 
 
-def setup7() -> list[Block]:
-    materials = Block(
-        buildings=[
-            make(2, Bname.reed_farm),
-            make(2, Bname.woodcutters_house),
-            make(2, Bname.foresters_house),
-            make(4, Bname.clay_pit),
-            make(2, Bname.brick_kiln),
-            make(4, Bname.well),
-        ],
-    )
-    food = Block(
-        buildings=[
-            make(2, Bname.tavern),
-            make(2, Bname.smokery),
-            make(2, Bname.fishers_house),
-            make(1, Bname.collectors_house),
-            make(1, Bname.berry_farm),
-            make(2, Bname.tavern),
-            make(2, Bname.bakery),
-            make(3, Bname.farm),
-            make(2, Bname.well),
-        ],
-    )
-    mines = Block(
-        buildings=[
-            make(3, Bname.coalmine),
-            make(1, Bname.rockmine),
-            make(3, Bname.ironmine),
-        ],
-    )
-    ironworks = Block(
-        buildings=[
-            make(2, Bname.furnace),
-            make(1, Bname.blacksmithy),
-            make(1, Bname.armor_smithy_small),
-        ],
-    )
-    soldiers = Block(
-        buildings=[
-            make(1, Bname.barracks),
-            make(1, Bname.sewing_room),
-            make(2, Bname.reindeer_farm),
-            make(3, Bname.farm),
-            make(3, Bname.well),
-        ],
-    )
-    wood = Block(
-        buildings=[
-            make(3, Bname.foresters_house),
-            make(5, Bname.woodcutters_house),
-        ],
-    )
-    food2 = Block(
-        buildings=[
-            make(4, Bname.tavern),
-            make(2, Bname.smokery),
-            make(2, Bname.fishers_house),
-            make(2, Bname.woodcutters_house),
-            make(2, Bname.foresters_house),
-        ],
-    )
+def setup7() -> list[list[BuildingCount]]:
+    materials = [
+        make(2, Bname.reed_farm),
+        make(2, Bname.woodcutters_house),
+        make(2, Bname.foresters_house),
+        make(4, Bname.clay_pit),
+        make(2, Bname.brick_kiln),
+        make(4, Bname.well),
+    ]
+    food = [
+        make(2, Bname.tavern),
+        make(2, Bname.smokery),
+        make(2, Bname.fishers_house),
+        make(1, Bname.collectors_house),
+        make(1, Bname.berry_farm),
+        make(2, Bname.tavern),
+        make(2, Bname.bakery),
+        make(3, Bname.farm),
+        make(2, Bname.well),
+    ]
+    mines = [
+        make(3, Bname.coalmine),
+        make(1, Bname.rockmine),
+        make(3, Bname.ironmine),
+    ]
+    ironworks = [
+        make(2, Bname.furnace),
+        make(1, Bname.blacksmithy),
+        make(1, Bname.armor_smithy_small),
+    ]
+    soldiers = [
+        make(1, Bname.barracks),
+        make(1, Bname.sewing_room),
+        make(2, Bname.reindeer_farm),
+        make(3, Bname.farm),
+        make(3, Bname.well),
+    ]
+    wood = [
+        make(3, Bname.foresters_house),
+        make(5, Bname.woodcutters_house),
+    ]
+    food2 = [
+        make(4, Bname.tavern),
+        make(2, Bname.smokery),
+        make(2, Bname.fishers_house),
+        make(2, Bname.woodcutters_house),
+        make(2, Bname.foresters_house),
+    ]
     return [materials, food, mines, ironworks, soldiers, wood, food2]
 
 
