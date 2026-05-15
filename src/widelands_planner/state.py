@@ -2171,7 +2171,7 @@ class SolverState:
 
 def solver_state_from_blocks(blocks: list[list[BuildingCount]]) -> SolverState:
     B: Final = len(blocks)
-    N: Final = max(len(block) for block in blocks)
+    N: Final = max((len(block) for block in blocks), default=0)
     I: Final = len(Item)
 
     # maps a flat building to its entry in production and consumption (first two indices)
