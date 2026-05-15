@@ -10,7 +10,7 @@ from pathlib import Path
 from typing import assert_never
 from uuid import uuid4
 
-import pandas as pd
+import pandas as pd  # pyright: ignore[reportMissingTypeStubs]
 import streamlit as st
 
 from widelands_planner import state
@@ -239,7 +239,7 @@ def st_ivec(ivec: state.Ivec):
     # but we could just use polars to inject html? more control
     # it just needs some work to fit into the streamlit visual design
     st.table(  # pyright: ignore[reportUnknownMemberType]
-        df.style.format(
+        df.style.format(  # pyright: ignore[reportUnknownMemberType]
             {
                 "i/min": "{:.1f}",
             }
@@ -400,16 +400,12 @@ def main():
     # balances, balance = get_state(session, buildings)
     bnames = sorted(state.Bname)
 
-    blocks: list[state.Block] = []
-    for block in session.blocks:
-        counts = [get_state_block_count(buildings, count) for count in block.counts]
-        blocks.append(state.Block(counts))
+    blocks = [
+        [get_state_block_count(buildings, count) for count in block.counts]
+        for block in session.blocks
+    ]
 
-    # TODO seems take_total() is most expensive, in flood forward most prominently
-    # just means the main math backbone should be done with np probably
-    status, block_allocations = state.fixpoint(blocks)
-    # status, block_allocations = state.profile_fixpoint(blocks)
-    # status, block_allocations = state.pyinstrument_fixpoint(blocks)
+    block_allocations, iterations = state.solve(blocks)
 
     with st.sidebar:
         st.subheader("global")
@@ -417,8 +413,8 @@ def main():
             st_ivec(
                 state.isum(
                     alloc.make_remote()
-                    for allocations in block_allocations
-                    for alloc in allocations
+                    for block in block_allocations
+                    for alloc in block
                 ),
             )
         st.divider()
@@ -428,7 +424,7 @@ def main():
             st.button("save", on_click=save_state)
             st.button("load", on_click=load_state)
         st.divider()
-        st.markdown(f":small[{status}]")
+        st.markdown(f":small[{iterations} iterations]")
 
     block_names = [block.name.get() for block in session.blocks]
     if len(block_names) == 0:
@@ -475,8 +471,8 @@ def main():
                                 width=150,
                             )
                             if (
-                                math.ceil(alloc.building.count * alloc.stable_usage)
-                                < alloc.building.count
+                                math.ceil(count_state.count.get() * alloc.stable_usage)
+                                < count_state.count.get()
                             ):
                                 st.markdown(":material/remove:")
                             elif alloc.is_infinite:
@@ -572,24 +568,24 @@ def main():
                             key=f"button.block[{block.id}].add",
                             on_click=block.counts.add_fn(state.Bname.fishers_house),
                         )
-                        all_take = {
-                            item
-                            for alloc in allocations
-                            for item in alloc.building.building.takes
-                        }
-                        all_make = {
-                            item
-                            for alloc in allocations
-                            for item in alloc.building.building.makes
-                        }
-                        missing_items = all_take - all_make
-                        for name, building in buildings.items():
-                            if missing_items & building.get_make_items():
-                                st.button(
-                                    name.value,
-                                    key=f"button.block[{block.id}].add[{name}]",
-                                    on_click=block.counts.add_fn(name),
-                                )
+                        # all_take = {
+                        #     item
+                        #     for alloc in allocations
+                        #     for item in alloc.building.building.takes
+                        # }
+                        # all_make = {
+                        #     item
+                        #     for alloc in allocations
+                        #     for item in alloc.building.building.makes
+                        # }
+                        # missing_items = all_take - all_make
+                        # for name, building in buildings.items():
+                        #     if missing_items & building.get_make_items():
+                        #         st.button(
+                        #             name.value,
+                        #             key=f"button.block[{block.id}].add[{name}]",
+                        #             on_click=block.counts.add_fn(name),
+                        #         )
 
 
 # TODO problems
@@ -614,4 +610,5 @@ def main():
 # TODO when buildings are there but with 0 count, then the add/remove/inf indicators are off
 
 if __name__ == "__main__":
+    # TODO we should have a module and import it
     main()

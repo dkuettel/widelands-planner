@@ -2,20 +2,15 @@ from __future__ import annotations
 
 import math
 import re
-import time
-from collections import Counter, deque
 from collections.abc import (
     Callable,
-    Generator,
     Iterable,
     Iterator,
     Mapping,
     Sequence,
     Set,
 )
-from cProfile import Profile
 from dataclasses import dataclass, field
-from datetime import datetime
 from enum import StrEnum
 from functools import cache, partial, wraps
 from pathlib import Path
@@ -30,13 +25,13 @@ type farray = np.typing.NDArray[np.floating]
 
 
 def profile[**P, R](fn: Callable[P, R]) -> Callable[P, R]:
-    import line_profiler  # pyright: ignore[reportMissingImports]
+    import line_profiler
 
-    fn = line_profiler.profile(fn)  # pyright: ignore[reportUnknownVariableType, reportUnknownMemberType]
+    fn = line_profiler.profile(fn)  # pyright: ignore[reportUnknownVariableType]
 
-    @wraps(fn)  # pyright: ignore[reportUnknownArgumentType]
+    @wraps(fn)
     def wrapper(*args: P.args, **kwargs: P.kwargs) -> R:
-        return fn(*args, **kwargs)  # pyright: ignore[reportUnknownVariableType]
+        return fn(*args, **kwargs)
 
     return wrapper
 
@@ -516,9 +511,7 @@ class BaseBuilding:
     ) -> Ivec:
         return self.get_ips(None, None, takes, makes, speed).take.smul(usage)
 
-    def get_enabled_crafting_levels(
-        self, takes: set[Item], makes: set[Item]
-    ) -> list[list[Crafting]]:
+    def get_enabled_crafting_levels(self, takes: set[Item]) -> list[list[Crafting]]:
         return [
             [
                 crafting
@@ -574,148 +567,40 @@ class BaseBuilding:
     def produces_ips(
         self,
         takes: set[Item],
-        makes: set[Item],
         speed: float,
         allocation: Ivec,
     ) -> tuple[Ivec, Ivec]:
-        _take, make_main, make_aux, _used = self.allocate_ips(
-            takes, makes, speed, allocation
-        )
+        _take, make_main, make_aux, _used = self.allocate_ips(takes, speed, allocation)
         return make_main, make_aux
 
     def np_produces_ips(
         self,
         takes: set[Item],
-        makes: set[Item],
         speed: float,
         allocation: farray,
     ) -> tuple[farray, farray]:
         _np_total_take_ips, np_total_make_main_ips, np_total_make_aux_ips, _used = (
-            self.np_allocate_ips_new_np(takes, makes, speed, allocation, None)
+            self.np_allocate_ips_new_np(takes, speed, allocation, None)
         )
         return np_total_make_main_ips, np_total_make_aux_ips
 
     def allocate_ips(
         self,
         takes: set[Item],
-        makes: set[Item],
         speed: float,
         allocation: Ivec,
         limit: Ivec | None = None,
     ) -> tuple[Ivec, Ivec, Ivec, float]:
         # old = self.allocate_ips_old(takes, makes, speed, allocation, limit)
-        new = self.allocate_ips_new(takes, makes, speed, allocation, limit)
+        new = self.allocate_ips_new(takes, speed, allocation, limit)
         # assert new == old, breakpoint()
         # TODO result is the same now, but new is actually slower
         # probably that we have to move between ivec and numpy
         return new
 
-    def allocate_ips_old(
-        self,
-        takes: set[Item],
-        makes: set[Item],
-        speed: float,
-        allocation: Ivec,
-        limit: Ivec | None = None,
-    ) -> tuple[Ivec, Ivec, Ivec, float]:
-        # NOTE the limit only affects output that experiences back-pressure, therefore, the final allocated output could be more than the limit
-        # NOTE limit is interpreted as limit only when value set unset values are "inf"
-        if limit is None:
-            limit = ifrom({i: math.inf for i in Item})
-        else:
-            limit = ifrom(
-                {i: (limit[i] if i in limit.data else math.inf) for i in Item}
-            )
-        assert all(v >= 0.0 for v in limit.data.values()), limit
-        # TODO actually we can only control the takes, not the makes, right?
-        crafting_levels: list[list[Crafting]] = self.get_enabled_crafting_levels(
-            takes, makes
-        )
-        crafting_levels = [
-            [
-                crafting
-                for crafting in level
-                if crafting.take.nonzero_items() <= allocation.nonzero_items()
-                and not (
-                    crafting.make_main.nonzero_items()
-                    & {i for i, v in limit.data.items() if v == 0.0}
-                )
-            ]
-            for level in crafting_levels
-        ]
-        crafting_levels = [level for level in crafting_levels if len(level) > 0]
-        total_take_ips = izeros()
-        total_make_main_ips = izeros()
-        total_make_aux_ips = izeros()
-        used = 0.0
-        while used < 1.0 and len(crafting_levels) > 0:
-            take_ips, make_main_ips, make_aux_ips = self.take_make_ips_from_craftings(
-                crafting_levels[0], speed
-            )
-            allocation_constraints = (
-                (item, allocation[item] / ips)
-                for item, ips in take_ips.data.items()
-                if ips > 0.0
-            )
-            allocation_item, allocation_ratio = min(
-                allocation_constraints, key=lambda x: x[1], default=(None, 1.0)
-            )
-            limit_constraints = (
-                (item, limit[item] / ips)
-                for item, ips in make_main_ips.data.items()
-                if ips > 0.0 and item in limit.data
-            )
-            limit_item, limit_ratio = min(
-                limit_constraints, key=lambda x: x[1], default=(None, 1.0)
-            )
-            ratio = min(allocation_ratio, limit_ratio)
-            # TODO will it work when they are both true? or is there a problem when they should be both true but eps makes only one true?
-            used_allocation_ratio = ratio == allocation_ratio
-            used_limit_ratio = ratio == limit_ratio
-            assert 0 <= ratio, (
-                allocation_item,
-                allocation_ratio,
-                limit_item,
-                limit_ratio,
-            )
-            # TODO doesnt this break used_limit_ratio and used_allocation_ratio in some cases?
-            old_used, used = used, min(used + ratio, 1.0)
-            ratio = used - old_used
-            # TODO i think here and limit below are expensive because with inf and min(0, ...) they become dense, np here should help?
-            allocation = allocation.sub(take_ips.smul(ratio))
-            allocation = allocation.low_clipped(0.0)
-            if allocation_item is not None and used_allocation_ratio:
-                allocation.data[allocation_item] = 0.0
-            assert all(v >= 0.0 for v in allocation.data.values()), allocation
-            limit = limit.sub(make_main_ips.smul(ratio))
-            limit = limit.low_clipped(0.0)
-            if limit_item is not None and used_limit_ratio:
-                limit.data[limit_item] = 0.0
-            assert all(v >= 0.0 for v in limit.data.values()), limit
-            total_take_ips = total_take_ips.add(take_ips.smul(ratio))
-            total_make_main_ips = total_make_main_ips.add(make_main_ips.smul(ratio))
-            total_make_aux_ips = total_make_aux_ips.add(make_aux_ips.smul(ratio))
-            # TODO repeated with code at the beginning
-            crafting_levels = [
-                [
-                    crafting
-                    for crafting in level
-                    if crafting.take.nonzero_items() <= allocation.nonzero_items()
-                    and not (
-                        crafting.make_main.nonzero_items()
-                        & {i for i, v in limit.data.items() if v == 0.0}
-                    )
-                ]
-                for level in crafting_levels
-            ]
-            crafting_levels = [level for level in crafting_levels if len(level) > 0]
-        assert 0 <= used <= 1.0, used
-        return total_take_ips, total_make_main_ips, total_make_aux_ips, used
-
     def allocate_ips_new(
         self,
         takes: set[Item],
-        makes: set[Item],
         speed: float,
         allocation: Ivec,
         limit: Ivec | None = None,
@@ -730,7 +615,7 @@ class BaseBuilding:
         np_limit = np_from_ivec(limit)
 
         np_total_take_ips, np_total_make_main_ips, np_total_make_aux_ips, used = (
-            self.np_allocate_ips_new_np(takes, makes, speed, np_allocation, np_limit)
+            self.np_allocate_ips_new_np(takes, speed, np_allocation, np_limit)
         )
 
         return (
@@ -743,7 +628,6 @@ class BaseBuilding:
     def np_allocate_ips_new_np(
         self,
         takes: set[Item],
-        makes: set[Item],
         speed: float,
         np_allocation: farray,
         np_limit: farray | None,
@@ -753,9 +637,7 @@ class BaseBuilding:
             np_limit = np_limit.astype(np.float32)
 
         # TODO actually we can only control the takes, not the makes, right?
-        crafting_levels: list[list[Crafting]] = self.get_enabled_crafting_levels(
-            takes, makes
-        )
+        crafting_levels: list[list[Crafting]] = self.get_enabled_crafting_levels(takes)
         # TODO this might be precomputed or cached?
         crafting_levels = [
             [
@@ -936,7 +818,7 @@ class BaseBuilding:
                 pass
         # TODO would it converge faster/better if we based it on the previous feasible allocation?
         # TODO this is the most expensive thing here, also might be cached ...
-        levels: list[list[Crafting]] = self.get_enabled_crafting_levels(takes, makes)
+        levels: list[list[Crafting]] = self.get_enabled_crafting_levels(takes)
         craftings: list[Crafting] = [crafting for level in levels for crafting in level]
         craftings = [crafting for crafting in craftings if crafting.take[item] > 0.0]
         enabled: list[bool | None] = [None] * len(craftings)
@@ -987,37 +869,31 @@ class BaseBuilding:
         cached_wants_ips[self.name, frozenset(takes), frozenset(makes), item] = ips
         return ips
 
-    def limit_waste(
-        self, takes: set[Item], makes: set[Item], speed: float, allocation: Ivec
-    ) -> Ivec:
-        take, _make_main, _make_aux, _used = self.allocate_ips(
-            takes, makes, speed, allocation
-        )
+    def limit_waste(self, takes: set[Item], speed: float, allocation: Ivec) -> Ivec:
+        take, _make_main, _make_aux, _used = self.allocate_ips(takes, speed, allocation)
         return take
 
     def back_pressure(
         self,
         takes: set[Item],
-        makes: set[Item],
         speed: float,
         allocation: Ivec,
         limit: Ivec,
     ) -> Ivec:
         take, _make_main, _make_aux, _used = self.allocate_ips(
-            takes, makes, speed, allocation, limit
+            takes, speed, allocation, limit
         )
         return take
 
     def np_back_pressure(
         self,
         takes: set[Item],
-        makes: set[Item],
         speed: float,
         allocation: farray,
         limit: farray,
     ):
         take, _make_main, _make_aux, _used = self.np_allocate_ips_new_np(
-            takes, makes, speed, allocation, limit
+            takes, speed, allocation, limit
         )
         return take
 
@@ -1026,28 +902,12 @@ class BaseBuilding:
         allocation: Ivec,
         limit: Ivec,
         takes: set[Item],
-        makes: set[Item],
         speed: float,
     ) -> float:
         _take, _make_main, _make_aux, used = self.allocate_ips(
-            takes, makes, speed, allocation, limit
+            takes, speed, allocation, limit
         )
         return used
-
-    def get_constraints(
-        self,
-        usage: Variable,
-        takes: set[Item],
-        makes: set[Item],
-        speed: float,
-    ) -> tuple[
-        dict[Item, dict[Variable, float]],
-        dict[Item, dict[Variable, float]],
-        list[Equality],
-        dict[Variable, float],  # minimization
-    ]:
-        # TODO remove
-        assert False
 
     def takes_ips(
         self,
@@ -1092,55 +952,32 @@ class ConfiguredGenericBuilding:
         return self.building.needs_ips(self.takes, self.makes, self.speed, usage)
 
     def produces_ips(self, allocation: Ivec) -> tuple[Ivec, Ivec]:
-        return self.building.produces_ips(
-            self.takes, self.makes, self.speed, allocation
-        )
+        return self.building.produces_ips(self.takes, self.speed, allocation)
 
     def np_produces_ips(self, allocation: farray) -> tuple[farray, farray]:
-        return self.building.np_produces_ips(
-            self.takes, self.makes, self.speed, allocation
-        )
+        return self.building.np_produces_ips(self.takes, self.speed, allocation)
 
     # TODO instead we could precompute here and have it as a field?
     def wants_ips(self, item: Item) -> float:
         return self.building.wants_ips(self.takes, self.makes, self.speed, item)
 
     def limit_waste(self, allocation: Ivec) -> Ivec:
-        return self.building.limit_waste(self.takes, self.makes, self.speed, allocation)
+        return self.building.limit_waste(self.takes, self.speed, allocation)
 
     def back_pressure(self, allocation: Ivec, limit: Ivec) -> Ivec:
-        return self.building.back_pressure(
-            self.takes, self.makes, self.speed, allocation, limit
-        )
+        return self.building.back_pressure(self.takes, self.speed, allocation, limit)
 
     def np_back_pressure(self, allocation: farray, limit: farray) -> farray:
-        return self.building.np_back_pressure(
-            self.takes, self.makes, self.speed, allocation, limit
-        )
+        return self.building.np_back_pressure(self.takes, self.speed, allocation, limit)
 
     def usage_for(self, allocation: Ivec, limit: Ivec) -> float:
-        return self.building.usage_for(
-            allocation, limit, self.takes, self.makes, self.speed
-        )
+        return self.building.usage_for(allocation, limit, self.takes, self.speed)
 
     def takes_ips(self, take: Ivec | None = None, make: Ivec | None = None) -> Ivec:
         return self.building.takes_ips(take, make, self.takes, self.makes, self.speed)
 
     def makes_ips(self, take: Ivec | None = None, make: Ivec | None = None) -> Ivec:
         return self.building.makes_ips(take, make, self.takes, self.makes, self.speed)
-
-    def get_constraints(
-        self, usage: Variable
-    ) -> tuple[
-        dict[Item, dict[Variable, float]],
-        dict[Item, dict[Variable, float]],
-        list[Equality],
-        dict[Variable, float],  # minimization
-    ]:
-        takes, makes, equalities, mins = self.building.get_constraints(
-            usage, self.takes, self.makes, self.speed
-        )
-        return takes, makes, equalities, mins
 
 
 type Building = BaseBuilding
@@ -1219,40 +1056,6 @@ class BuildingCount:
 
     def makes_ips(self, take: Ivec | None = None, make: Ivec | None = None) -> Ivec:
         return self.building.makes_ips(take, make).smul(self.count)
-
-    def get_constraints(
-        self,
-    ) -> tuple[
-        dict[Item, dict[Variable, float]],
-        dict[Item, dict[Variable, float]],
-        list[Equality],
-        Variable,
-        dict[Variable, float],  # minimization
-    ]:
-        # TODO these descs are not fully unique, but makes it easier to debug the qp
-        usage = Variable(f"{self.building.building.name.value}/usage", 0.0, 1.0)
-        idle = Variable(f"{self.building.building.name.value}/idle", 0.0, 1.0)
-
-        equations: list[Equality] = []
-        equations.append(Equality({usage: 1.0, idle: 1.0}, 1.0))
-
-        takes, makes, equalities, mins = self.building.get_constraints(usage)
-
-        equations.extend(equalities)
-
-        takes = {
-            item: {var: (self.count * weight) for (var, weight) in vars.items()}
-            for (item, vars) in takes.items()
-        }
-
-        makes = {
-            item: {var: (self.count * weight) for (var, weight) in vars.items()}
-            for (item, vars) in makes.items()
-        }
-
-        mins = {v: (self.count * w) for (v, w) in mins.items()}
-
-        return takes, makes, equations, idle, mins
 
 
 def extract_plain_timings(path: Path) -> tuple[float, float]:
@@ -2448,13 +2251,13 @@ def solve(blocks: list[list[BuildingCount]]) -> tuple[list[list[Allocated]], int
 
     allocated = rounded_allocations(allocated)
 
-    blocks: dict[int, dict[int, Allocated]] = dict()
+    reblocks: dict[int, dict[int, Allocated]] = dict()
 
     for (i, j), alloc in zips(state.index, allocated):
-        blocks.setdefault(i, dict())[j] = alloc
+        reblocks.setdefault(i, dict())[j] = alloc
 
     listed_blocks = [
-        [i for _, i in sorted(block.items())] for _, block in sorted(blocks.items())
+        [i for _, i in sorted(block.items())] for _, block in sorted(reblocks.items())
     ]
 
     return listed_blocks, count

@@ -2,11 +2,7 @@ from __future__ import annotations
 
 import pickle
 import time
-from copy import deepcopy
-from cProfile import Profile
 from pathlib import Path
-
-import numpy as np
 
 from widelands_planner.state import (
     Block,
@@ -14,17 +10,11 @@ from widelands_planner.state import (
     BuildingCount,
     ConfiguredGenericBuilding,
     Item,
-    allocated_from_state,
     building_from_name,
     get_buildings,
     have_allocations_converged,
-    ips_eps,
     print_block,
-    rounded_allocations,
     solve,
-    solver_has_converged,
-    solver_state_from_blocks,
-    solver_update_state,
     zips,
 )
 
