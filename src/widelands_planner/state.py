@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import math
 import re
+import time
 from collections.abc import (
     Callable,
     Iterable,
@@ -14,7 +15,7 @@ from dataclasses import dataclass, field
 from enum import StrEnum
 from functools import cache, partial, wraps
 from pathlib import Path
-from typing import Final, override
+from typing import Final, Literal, override
 
 import numpy as np
 from tabulate import tabulate
@@ -2221,7 +2222,22 @@ def has_state_converged(old: None | SolverState, new: SolverState) -> bool:
     return r.item()
 
 
-def solve(blocks: list[list[BuildingCount]]) -> tuple[list[list[Allocated]], int]:
+@dataclass(frozen=True)
+class SolutionStatus:
+    converged: Literal[True]
+    iterations: int
+    milliseconds: int
+
+    @override
+    def __str__(self) -> str:
+        return f"{self.iterations} iterations converged in {self.milliseconds}ms."
+
+
+def solve(
+    blocks: list[list[BuildingCount]],
+) -> tuple[list[list[Allocated]], SolutionStatus]:
+    dt = time.perf_counter_ns()
+
     prev_state = None
     state = solver_state_from_blocks(blocks)
     flooded_state = state
@@ -2260,7 +2276,11 @@ def solve(blocks: list[list[BuildingCount]]) -> tuple[list[list[Allocated]], int
         [i for _, i in sorted(block.items())] for _, block in sorted(reblocks.items())
     ]
 
-    return listed_blocks, count
+    ms = (time.perf_counter_ns() - dt) / 1e6
+
+    return listed_blocks, SolutionStatus(
+        converged=True, iterations=count, milliseconds=round(ms)
+    )
 
 
 def solver_has_converged(

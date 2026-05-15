@@ -405,7 +405,7 @@ def main():
         for block in session.blocks
     ]
 
-    block_allocations, iterations = state.solve(blocks)
+    block_allocations, status = state.solve(blocks)
 
     with st.sidebar:
         st.subheader("global")
@@ -424,7 +424,7 @@ def main():
             st.button("save", on_click=save_state)
             st.button("load", on_click=load_state)
         st.divider()
-        st.markdown(f":small[{iterations} iterations]")
+        st.markdown(f":small[{status}]")
 
     block_names = [block.name.get() for block in session.blocks]
     if len(block_names) == 0:
