@@ -390,7 +390,13 @@ def main():
     blocks, block_indices, building_indices = get_blocks()
     allocated, status = solve(blocks)
 
-    st.markdown(f":small[{status}]")
+    with st.sidebar:
+        st.subheader("total exports")
+        st_ivec(
+            isum(alloc.make_remote() for block in allocated for alloc in block),
+        )
+        st.divider()
+        st.markdown(f":small[{status}]")
 
     st_backfill_solution(
         st_meta,
