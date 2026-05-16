@@ -596,18 +596,9 @@ def main():
 # adding a building doesnt fokus on the name selection, but maybe there are buttons for adding the right one in the first place?
 # save all the time, keep a timeline? save version to load old stuff?
 # order buildings, by feed-into-order?
-# instead, say what blocks you want to import from? a map would almost be easier :) with a flow
-# long sword, in tight production, almost always skipped because it needs 2 iron, unfortunate dynamics
 # when gaming out a new addition, would be nice to see the diff until "confirmed", or todo add click checkboxes
 #    (almost like a new block, and then merge it in when done)
 #    and/or a way for the blocks to be repeated, this is how you play it usually
-# the soldier recruitement, and eventually the recycling is harder to model well
-#    almost thinking we could also try to solve for a steady state now, instead of a saturated one?
-#    yes, the training could use insane amounts, and very uneven
-#    or maybe we can say for those buildings what production ratio we expect?
-#    for the soldiers, assuming no war, we need every level same thruput, as the first one, obviously
-#    and thats partly the same building, so it would naturally just adapt and do whatever?
-#    so maybe lets try a forward-wave computation
 
 # TODO when buildings are there but with 0 count, then the add/remove/inf indicators are off
 
