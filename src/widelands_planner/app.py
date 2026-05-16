@@ -170,7 +170,8 @@ def st_block_buildings(
                     width=150,
                 )
 
-                st_metrics[building_uuid] = st.empty()
+                with st.container(width=140):
+                    st_metrics[building_uuid] = st.empty()
 
                 name = st.selectbox(
                     "name",
