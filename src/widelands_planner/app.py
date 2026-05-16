@@ -14,6 +14,7 @@ from widelands_planner.state import (
     Bname,
     BuildingCount,
     ConfiguredGenericBuilding,
+    Item,
     Ivec,
     building_from_name,
     isum,
@@ -115,12 +116,20 @@ def keep_state_alive():
             f"building_entries[{block_uuid}]", []
         )
         for building_uuid in building_entries:
-            st.session_state[f"building[{building_uuid}].name"] = st.session_state.get(
-                f"building[{building_uuid}].name", None
-            )
+            name = st.session_state.get(f"building[{building_uuid}].name", None)
+            st.session_state[f"building[{building_uuid}].name"] = name
             st.session_state[f"building[{building_uuid}].count"] = st.session_state.get(
                 f"building[{building_uuid}].count", 0
             )
+            if name is not None:
+                bname = Bname(name)
+                st.session_state[
+                    f"building[{building_uuid}].settings.{bname}.takes"
+                ] = st.session_state.get(
+                    # TODO or nothing if None?
+                    f"building[{building_uuid}].settings.{bname}.takes",
+                    None,
+                )
 
 
 def st_block(
@@ -161,8 +170,10 @@ def st_block_buildings(
                     label_visibility="collapsed",
                     width=150,
                 )
+
                 st_metrics[building_uuid] = st.empty()
-                st.selectbox(
+
+                name = st.selectbox(
                     "name",
                     sorted(i.value for i in Bname),
                     index=None,
@@ -170,6 +181,25 @@ def st_block_buildings(
                     label_visibility="collapsed",
                     width=250,
                 )
+                bname = None if name is None else Bname(name)
+
+                # TODO lazy eval for speed?
+                with st.popover(
+                    ":material/settings:",
+                    key=f"building[{building_uuid}].settings",
+                    disabled=bname is None,
+                ):
+                    if bname is not None:
+                        building = building_from_name(bname)
+                        items = sorted(i.value for i in building.get_take_items())
+                        st.pills(
+                            "takes",
+                            items,
+                            default=items,
+                            selection_mode="multi",
+                            key=f"building[{building_uuid}].settings.{bname}.takes",
+                        )
+
                 if st.button(
                     ":material/delete:", key=f"remove building[{building_uuid}]"
                 ):
@@ -204,12 +234,19 @@ def get_blocks() -> tuple[
                 pass
             case _:
                 return None
+        match st.session_state.get(
+            f"building[{building_uuid}].settings.{bname}.takes", None
+        ):
+            case list() as takes:  # pyright: ignore[reportUnknownVariableType]
+                items: set[Item] = {Item(i) for i in takes}  # pyright: ignore[reportUnknownVariableType]
+            case _:
+                return None
         building = building_from_name(bname)
         return BuildingCount(
             count,
             ConfiguredGenericBuilding(
                 building,
-                building.get_take_items(),
+                items,
                 building.get_make_items(),
                 1.0,
             ),
