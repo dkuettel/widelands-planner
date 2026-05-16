@@ -159,9 +159,9 @@ def st_block_buildings(
 
     st_metrics: dict[str, DeltaGenerator] = dict()
 
-    with st.container(gap="small"):
+    with st.container(gap="xxsmall"):
         for building_uuid in building_entries:
-            with hcontainer(vertical_alignment="center", border=True):
+            with hcontainer(vertical_alignment="center", border=False):
                 st.number_input(
                     "count",
                     key=f"building[{building_uuid}].count",
@@ -383,7 +383,7 @@ def main():
 
     keep_state_alive()
 
-    with st.container(border=False):
+    with st.container(border=False, gap="xxsmall"):
         block_uuid = st_select_block()
         st.divider()
         st_meta, block_uuid, st_metrics, st_add_buildings = st_block(block_uuid)
