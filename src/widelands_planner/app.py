@@ -80,6 +80,22 @@ def st_select_block() -> None | str:
     return block_entries[block_name]
 
 
+def keep_state_alive():
+    # NOTE just reading doesnt make it persist, you have to set it too
+    block_entries: dict[str, str] = st.session_state.get("block_entries", dict())
+    for block_uuid in block_entries.values():
+        building_entries: list[str] = st.session_state.get(
+            f"building_entries[{block_uuid}]", []
+        )
+        for building_uuid in building_entries:
+            st.session_state[f"building[{building_uuid}].name"] = st.session_state.get(
+                f"building[{building_uuid}].name", None
+            )
+            st.session_state[f"building[{building_uuid}].count"] = st.session_state.get(
+                f"building[{building_uuid}].count", 0
+            )
+
+
 def main():
     st.set_page_config(
         page_icon=":material/table:",
@@ -87,7 +103,10 @@ def main():
         # layout="wide",
     )
 
+    keep_state_alive()
+
     with st.container(border=True):
+        # TODO return all blocks, and the one to show, we iterate all, to keep the state
         block_uuid = st_select_block()
 
         st.divider()
@@ -142,6 +161,7 @@ def main():
 
     for i, block_uuid in enumerate(block_entries.values()):
         blocks.append([])
+        building_entries = st.session_state.get(f"building_entries[{block_uuid}]", [])
         for j, building_uuid in enumerate(building_entries):
             match st.session_state.get(f"building[{building_uuid}].name", None):
                 case str(name):
@@ -186,7 +206,7 @@ def main():
 
 
 if __name__ == "__main__":
-    # NOTE this would be better, but st magic doesnt do reloads correctly then
+    # NOTE this would be better, but streamlit's magic fails to do reloads correctly then
     # from widelands_planner.app import main
 
     main()
