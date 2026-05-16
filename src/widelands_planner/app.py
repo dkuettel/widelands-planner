@@ -1,9 +1,7 @@
 from __future__ import annotations
 
 import os
-from dataclasses import dataclass, field
 from functools import partial
-from typing import override
 from uuid import uuid4
 
 import streamlit as st
@@ -13,11 +11,9 @@ from widelands_planner.state import (
     Allocated,
     Bname,
     BuildingCount,
-    ConfiguredBuilding,
     ConfiguredGenericBuilding,
     building_from_name,
     solve,
-    solver_update_state,
 )
 
 hcontainer = partial(st.container, horizontal=True)
