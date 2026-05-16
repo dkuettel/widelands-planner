@@ -122,14 +122,13 @@ def keep_state_alive():
                 f"building[{building_uuid}].count", 0
             )
             if name is not None:
-                bname = Bname(name)
-                st.session_state[
-                    f"building[{building_uuid}].settings.{bname}.takes"
-                ] = st.session_state.get(
-                    # TODO or nothing if None?
-                    f"building[{building_uuid}].settings.{bname}.takes",
-                    None,
+                takes = st.session_state.get(
+                    f"building[{building_uuid}].settings.{name}.takes", None
                 )
+                if takes is not None:
+                    st.session_state[
+                        f"building[{building_uuid}].settings.{name}.takes"
+                    ] = takes
 
 
 def st_block(
@@ -195,8 +194,8 @@ def st_block_buildings(
                         st.pills(
                             "takes",
                             items,
-                            default=items,
                             selection_mode="multi",
+                            default=items,
                             key=f"building[{building_uuid}].settings.{bname}.takes",
                         )
 
@@ -322,6 +321,8 @@ def st_backfill_solution(
                 )
 
     for uuid, dg in st_metrics.items():
+        if uuid not in building_indices:
+            continue  # buildings with no count or no type yet have no solved-for allocation
         i, j = building_indices[uuid]
         alloc = allocated[i][j]
         building = blocks[i][j]
