@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import math
 import os
 from functools import partial
 from uuid import uuid4
@@ -104,34 +105,40 @@ def st_block(block_uuid: str | None) -> dict[str, DeltaGenerator]:
 
     st_metrics: dict[str, DeltaGenerator] = dict()
 
-    for building_uuid in building_entries:
-        with hcontainer(vertical_alignment="center"):
-            with st.container():
-                _building_name = st.selectbox(
-                    "name",
-                    sorted(i.value for i in Bname),
-                    index=None,
-                    key=f"building[{building_uuid}].name",
-                    label_visibility="collapsed",
-                )
+    with st.container(gap="xxsmall"):
+        for building_uuid in building_entries:
+            with hcontainer(vertical_alignment="center"):
                 st.number_input(
                     "count",
                     key=f"building[{building_uuid}].count",
                     min_value=0,
                     label_visibility="collapsed",
+                    width=150,
                 )
-            st_metrics[building_uuid] = st.empty()
-            if st.button("remove building", key=f"remove building[{building_uuid}]"):
-                building_entries.remove(building_uuid)
-                st.session_state[f"building_entries[{block_uuid}]"] = building_entries
-                st.rerun()
+                st_metrics[building_uuid] = st.empty()
+                st.selectbox(
+                    "name",
+                    sorted(i.value for i in Bname),
+                    index=None,
+                    key=f"building[{building_uuid}].name",
+                    label_visibility="collapsed",
+                    width=250,
+                )
+                if st.button(
+                    ":material/delete:", key=f"remove building[{building_uuid}]"
+                ):
+                    building_entries.remove(building_uuid)
+                    st.session_state[f"building_entries[{block_uuid}]"] = (
+                        building_entries
+                    )
+                    st.rerun()
 
-        st.divider()
+            st.divider()
 
-    if st.button("add building", key="add building"):
-        building_entries.append(uuid4().hex)
-        st.session_state[f"building_entries[{block_uuid}]"] = building_entries
-        st.rerun()
+        if st.button("add building", key="add building"):
+            building_entries.append(uuid4().hex)
+            st.session_state[f"building_entries[{block_uuid}]"] = building_entries
+            st.rerun()
 
     return st_metrics
 
@@ -190,19 +197,32 @@ def get_blocks(
 
 
 def st_backfill_solution(
-    allocated: list[list[Allocated]], backfill: list[tuple[int, int, DeltaGenerator]]
+    blocks: list[list[BuildingCount]],
+    allocated: list[list[Allocated]],
+    backfill: list[tuple[int, int, DeltaGenerator]],
 ):
     for i, j, dg in backfill:
         alloc = allocated[i][j]
-        dg.metric(
-            "usage",
-            alloc.stable_usage,
-            alloc.flood_usage - alloc.stable_usage,
-            format="percent",
-            delta_color="off",
-            delta_arrow="auto",
-            delta_description="potential",
-        )
+        building = blocks[i][j]
+        with dg.container(horizontal=True, width="content"):
+            if math.ceil(building.count * alloc.stable_usage) < building.count:
+                st.markdown(":material/remove:")
+            elif alloc.is_infinite:
+                st.markdown(":material/all_inclusive:")
+            elif alloc.stable_usage < 1.0:
+                st.markdown(":material/check:")
+            else:
+                st.markdown(":material/add:")
+            st.markdown(
+                f"**{round(alloc.stable_usage * 100)}%**",
+                width=40,
+                text_alignment="right",
+            )
+            st.markdown(
+                f":small[+{round((alloc.flood_usage - alloc.stable_usage) * 100)}%]",
+                width=40,
+                text_alignment="right",
+            )
 
 
 def main():
@@ -224,7 +244,7 @@ def main():
 
     st.markdown(f":small[{status}]")
 
-    st_backfill_solution(allocated, backfill)
+    st_backfill_solution(blocks, allocated, backfill)
 
 
 if __name__ == "__main__":
