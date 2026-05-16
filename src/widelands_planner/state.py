@@ -2267,7 +2267,7 @@ def solve(
 
     allocated = rounded_allocations(allocated)
 
-    reblocks: dict[int, dict[int, Allocated]] = dict()
+    reblocks: dict[int, dict[int, Allocated]] = {i: dict() for i in range(len(blocks))}
 
     for (i, j), alloc in zips(state.index, allocated):
         reblocks.setdefault(i, dict())[j] = alloc
