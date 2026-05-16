@@ -182,6 +182,7 @@ def st_block_buildings(
                     width=250,
                 )
                 bname = None if name is None else Bname(name)
+                building = None if bname is None else building_from_name(bname)
 
                 # TODO lazy eval for speed?
                 with st.popover(
@@ -189,8 +190,7 @@ def st_block_buildings(
                     key=f"building[{building_uuid}].settings",
                     disabled=bname is None,
                 ):
-                    if bname is not None:
-                        building = building_from_name(bname)
+                    if bname is not None and building is not None:
                         items = sorted(i.value for i in building.get_take_items())
                         st.pills(
                             "takes",
@@ -208,6 +208,18 @@ def st_block_buildings(
                         building_entries
                     )
                     st.rerun()
+
+                if bname is not None and building is not None:
+                    items = st.session_state.get(
+                        f"building[{building_uuid}].settings.{bname}.takes", []
+                    )
+                    st.code(
+                        " + ".join(items)
+                        + " -> "
+                        # TODO should do it after the fact, because we dont produce all, depends on what we take
+                        + " + ".join(i.value for i in building.get_make_items()),
+                        language=None,
+                    )
 
         with st.container(horizontal=True):
             if st.button("add building", key="add building"):
