@@ -431,8 +431,8 @@ def main():
         st.write("no blocks")
     else:
         tabs = st.tabs(block_names)
-        for tab, block, allocations in state.zips(
-            tabs, session.blocks, block_allocations
+        for tab, block, allocations, state_block in state.zips(
+            tabs, session.blocks, block_allocations, blocks
         ):
             with tab:
                 meta, counts = st.columns([1, 4], gap="medium")
@@ -457,7 +457,9 @@ def main():
                             on_click=block.remove_fn(),
                         )
                 with counts, st.container(horizontal=False, border=False):
-                    for count_state, alloc in state.zips(block.counts, allocations):
+                    for count_state, alloc, _state_building in state.zips(
+                        block.counts, allocations, state_block
+                    ):
                         with st.container(
                             horizontal=True, border=True, vertical_alignment="center"
                         ):
@@ -568,24 +570,24 @@ def main():
                             key=f"button.block[{block.id}].add",
                             on_click=block.counts.add_fn(state.Bname.fishers_house),
                         )
-                        # all_take = {
-                        #     item
-                        #     for alloc in allocations
-                        #     for item in alloc.building.building.takes
-                        # }
-                        # all_make = {
-                        #     item
-                        #     for alloc in allocations
-                        #     for item in alloc.building.building.makes
-                        # }
-                        # missing_items = all_take - all_make
-                        # for name, building in buildings.items():
-                        #     if missing_items & building.get_make_items():
-                        #         st.button(
-                        #             name.value,
-                        #             key=f"button.block[{block.id}].add[{name}]",
-                        #             on_click=block.counts.add_fn(name),
-                        #         )
+                        all_take = {
+                            item
+                            for building in state_block
+                            for item in building.building.takes
+                        }
+                        all_make = {
+                            item
+                            for building in state_block
+                            for item in building.building.makes
+                        }
+                        missing_items = all_take - all_make
+                        for name, building in buildings.items():
+                            if missing_items & building.get_make_items():
+                                st.button(
+                                    name.value,
+                                    key=f"button.block[{block.id}].add[{name}]",
+                                    on_click=block.counts.add_fn(name),
+                                )
 
 
 # TODO problems
