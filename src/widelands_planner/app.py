@@ -277,7 +277,7 @@ def st_block_buildings(
                 with st.container(width=140, horizontal=True):
                     match building_indices.get(building_uuid, None):
                         case None:
-                            pass
+                            st.markdown(":material/more_horiz:")
                         case (int(i), int(j)):
                             building = blocks[i][j]
                             alloc = allocated[i][j]
