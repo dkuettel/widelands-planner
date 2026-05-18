@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import math
 import os
 from functools import partial
@@ -194,9 +195,7 @@ def state_set_building_takes(uuid: str, name: Bname, value: list[Item]):
 def ensure_state():
     # NOTE just reading st.session_state doesnt make state persist, you have to set it too
 
-    # TODO always set query to a json with the state, at the end, after ensure_state
-    # and if that is not slow, do it unconditionally, otherwise only on toggle, for bookmarks
-    # and load that at the beginning if we dont have a state
+    st.session_state["loaded"] = True
 
     block_entries = state_get_block_entries()
 
@@ -220,6 +219,34 @@ def ensure_state():
             if name is not None:
                 takes = state_get_building_takes(building_uuid, name)
                 state_set_building_takes(building_uuid, name, takes)
+
+
+def maybe_get_state_from_url():
+    if st.session_state.get("loaded", False):
+        return
+    if "state" not in st.query_params:
+        return
+    data = st.query_params["state"]
+    state = json.loads(data)
+    st.session_state.update(state)
+
+
+def set_url_from_state():
+    # TODO instead make all strings "state...." and then much easier to load and save?
+    def is_state(key: str | int) -> bool:
+        key = str(key)
+        if key in {"block_entries"}:
+            return True
+        if key.startswith("building_entries["):
+            return True
+        if key.startswith("building["):
+            return True
+        return False
+
+    state = {key: value for (key, value) in st.session_state.items() if is_state(key)}
+    data = json.dumps(state)
+    # TODO if this is slow, only do it on a toggle
+    st.query_params["state"] = data
 
 
 def st_block(
@@ -444,7 +471,9 @@ def main():
         layout="wide",
     )
 
+    maybe_get_state_from_url()
     ensure_state()
+    set_url_from_state()
 
     blocks, block_indices, building_indices = get_blocks()
     allocated, status = solve(blocks)
