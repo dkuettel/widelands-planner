@@ -192,7 +192,11 @@ def state_set_building_takes(uuid: str, name: Bname, value: list[Item]):
 
 
 def ensure_state():
-    # NOTE just reading doesnt make state persist, you have to set it too
+    # NOTE just reading st.session_state doesnt make state persist, you have to set it too
+
+    # TODO always set query to a json with the state, at the end, after ensure_state
+    # and if that is not slow, do it unconditionally, otherwise only on toggle, for bookmarks
+    # and load that at the beginning if we dont have a state
 
     block_entries = state_get_block_entries()
 
