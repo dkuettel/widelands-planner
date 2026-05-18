@@ -3,11 +3,11 @@ from __future__ import annotations
 import math
 import os
 from functools import partial
+from typing import Final
 from uuid import uuid4
 
 import pandas as pd  # pyright: ignore[reportMissingTypeStubs]
 import streamlit as st
-from streamlit.delta_generator import DeltaGenerator
 
 from widelands_planner.state import (
     Allocated,
@@ -66,29 +66,24 @@ def st_ivec(ivec: Ivec):
     )
 
 
-def st_select_block() -> None | str:
-    block_entries: dict[str, str] = st.session_state.get("block_entries", dict())
-
-    if len(block_entries) == 0:
-        block_entries = {"main": uuid4().hex}
-        st.session_state["block_entries"] = block_entries
-        st.session_state["block_name"] = "main"
-        st.rerun()
+def st_select_block():
+    block_entries = state_get_block_entries()
 
     with hcontainer(vertical_alignment="bottom"):
         block_name = st.selectbox(
             "select or create block",
             sorted(block_entries),
-            index=0,
             accept_new_options=True,
-            key="block_name",
+            key=key_block_name,
             width=300,
         )
 
         def remove_block():
+            block_entries = state_get_block_entries()
             block_entries.pop(block_name or "", "")
-            st.session_state["block_entries"] = block_entries
-            [st.session_state["block_name"], *_] = sorted(block_entries) or [None]
+            state_set_block_entries(block_entries)
+            [new_block_name, *_] = sorted(block_entries) or [None]
+            state_set_block_name(new_block_name)
 
         st.button(
             "remove block",
@@ -98,66 +93,175 @@ def st_select_block() -> None | str:
         )
 
     if block_name is None:
-        return None
+        return
 
     if block_name not in block_entries:
         block_entries[block_name] = uuid4().hex
-        st.session_state["block_entries"] = block_entries
+        state_set_block_entries(block_entries)
         st.rerun()
 
-    return block_entries[block_name]
 
-
-def keep_state_alive():
+def keep_state[T](key: str, default: T) -> T:
     # NOTE just reading doesnt make it persist, you have to set it too
-    block_entries: dict[str, str] = st.session_state.get("block_entries", dict())
+    value = st.session_state.get(key, default)
+    st.session_state[key] = value
+    return value
+
+
+def state_get_block_entries() -> dict[str, str]:
+    """maps a block name to a block uuid"""
+    return st.session_state.get("block_entries", dict())
+
+
+def state_set_block_entries(value: dict[str, str]):
+    st.session_state["block_entries"] = value
+
+
+key_block_name: Final = "block_name"
+
+
+def state_get_block_name() -> str | None:
+    return st.session_state.get(key_block_name, None)
+
+
+def state_set_block_name(value: str | None):
+    """current block uuid to show"""
+    st.session_state[key_block_name] = value
+
+
+def state_get_building_entries(block_uuid: str) -> list[str]:
+    return st.session_state.get(f"building_entries[{block_uuid}]", [])
+
+
+def state_set_building_entries(uuid: str, value: list[str]):
+    st.session_state[f"building_entries[{uuid}]"] = value
+
+
+def state_get_building_name(uuid: str) -> None | Bname:
+    value = st.session_state.get(f"building[{uuid}].name", None)
+    match value:
+        case None:
+            return None
+        case str():
+            if value in Bname:
+                return Bname(value)
+            return None
+        case _:
+            return None
+
+
+def state_set_building_name(uuid: str, value: None | Bname):
+    match value:
+        case None:
+            st.session_state[f"building[{uuid}].name"] = None
+        case Bname():
+            st.session_state[f"building[{uuid}].name"] = value.value
+
+
+def state_get_building_count(uuid: str) -> int:
+    value = st.session_state.get(f"building[{uuid}].count", 0)
+    match value:
+        case int():
+            return value
+        case _:
+            return 0
+
+
+def state_set_building_count(uuid: str, value: int):
+    st.session_state[f"building[{uuid}].count"] = value
+
+
+def state_get_building_takes(uuid: str, name: Bname) -> list[Item]:
+    value = st.session_state.get(f"building[{uuid}].settings.{name}.takes", None)
+    match value:
+        case list():
+            value = list(map(str, value))  # pyright: ignore[reportUnknownArgumentType]
+            if all((i in Item) for i in value):
+                return sorted(Item(i) for i in value)
+            building = building_from_name(name)
+            return sorted(building.get_take_items())
+        case None | _:
+            building = building_from_name(name)
+            return sorted(building.get_take_items())
+
+
+def state_set_building_takes(uuid: str, name: Bname, value: list[Item]):
+    st.session_state[f"building[{uuid}].settings.{name}.takes"] = [
+        i.value for i in value
+    ]
+
+
+def ensure_state():
+    # NOTE just reading doesnt make state persist, you have to set it too
+
+    block_entries = state_get_block_entries()
+
+    if len(block_entries) == 0:
+        block_entries = {"main": uuid4().hex}
+        state_set_block_name("main")
+
+    state_set_block_entries(block_entries)
+
     for block_uuid in block_entries.values():
-        building_entries: list[str] = st.session_state.get(
-            f"building_entries[{block_uuid}]", []
-        )
+        building_entries = state_get_building_entries(block_uuid)
+        state_set_building_entries(block_uuid, building_entries)
+
         for building_uuid in building_entries:
-            name = st.session_state.get(f"building[{building_uuid}].name", None)
-            st.session_state[f"building[{building_uuid}].name"] = name
-            st.session_state[f"building[{building_uuid}].count"] = st.session_state.get(
-                f"building[{building_uuid}].count", 0
-            )
+            name = state_get_building_name(building_uuid)
+            state_set_building_name(building_uuid, name)
+
+            count = state_get_building_count(building_uuid)
+            state_set_building_count(building_uuid, count)
+
             if name is not None:
-                takes = st.session_state.get(
-                    f"building[{building_uuid}].settings.{name}.takes", None
-                )
-                if takes is not None:
-                    st.session_state[
-                        f"building[{building_uuid}].settings.{name}.takes"
-                    ] = takes
+                takes = state_get_building_takes(building_uuid, name)
+                state_set_building_takes(building_uuid, name, takes)
 
 
 def st_block(
-    block_uuid: str | None,
-) -> tuple[
-    DeltaGenerator | None, str | None, dict[str, DeltaGenerator], DeltaGenerator | None
-]:
-    if block_uuid is None:
-        st.warning("No block selected")
-        return None, None, dict(), None
+    blocks: list[list[BuildingCount]],
+    block_indices: dict[str, int],
+    building_indices: dict[str, tuple[int, int]],
+    allocated: list[list[Allocated]],
+):
+    block_name = state_get_block_name()
+    if block_name is None:
+        st.warning("No block selected.")
+        return
+
+    block_uuid = state_get_block_entries()[block_name]
 
     meta, buildings = st.columns([1, 4], gap="medium")
 
-    meta = meta.empty()
+    with meta:
+        i = block_indices[block_uuid]
+        with st.expander("imports", expanded=True):
+            st_ivec(
+                isum(alloc.take_remote for alloc in allocated[i]),
+            )
+        with st.expander("local", expanded=True):
+            st_ivec(
+                isum(alloc.make_local() for alloc in allocated[i]),
+            )
+        with st.expander("exports", expanded=True):
+            st_ivec(
+                isum(alloc.make_remote() for alloc in allocated[i]),
+            )
 
     with buildings:
-        st_metrics, st_add_buildings = st_block_buildings(block_uuid)
-
-    return meta, block_uuid, st_metrics, st_add_buildings
+        st_block_buildings(
+            block_uuid, blocks, block_indices, building_indices, allocated
+        )
 
 
 def st_block_buildings(
     block_uuid: str,
-) -> tuple[dict[str, DeltaGenerator], DeltaGenerator]:
-    building_entries: list[str] = st.session_state.get(
-        f"building_entries[{block_uuid}]", []
-    )
-
-    st_metrics: dict[str, DeltaGenerator] = dict()
+    blocks: list[list[BuildingCount]],
+    block_indices: dict[str, int],
+    building_indices: dict[str, tuple[int, int]],
+    allocated: list[list[Allocated]],
+):
+    building_entries = state_get_building_entries(block_uuid)
 
     with st.container(gap="xxsmall"):
         for building_uuid in building_entries:
@@ -170,8 +274,36 @@ def st_block_buildings(
                     width=150,
                 )
 
-                with st.container(width=140):
-                    st_metrics[building_uuid] = st.empty()
+                with st.container(width=140, horizontal=True):
+                    match building_indices.get(building_uuid, None):
+                        case None:
+                            pass
+                        case (int(i), int(j)):
+                            building = blocks[i][j]
+                            alloc = allocated[i][j]
+                            if building.count == 0:
+                                st.markdown(":material/warning:")
+                            elif (
+                                math.ceil(building.count * alloc.stable_usage)
+                                < building.count
+                            ):
+                                st.markdown(":material/remove:")
+                            elif alloc.is_infinite:
+                                st.markdown(":material/all_inclusive:")
+                            elif alloc.stable_usage < 1.0:
+                                st.markdown(":material/check:")
+                            else:
+                                st.markdown(":material/add:")
+                            st.markdown(
+                                f"**{round(alloc.stable_usage * 100)}%**",
+                                width=40,
+                                text_alignment="right",
+                            )
+                            st.markdown(
+                                f":small[+{round((alloc.flood_usage - alloc.stable_usage) * 100)}%]",
+                                width=40,
+                                text_alignment="right",
+                            )
 
                 name = st.selectbox(
                     "name",
@@ -227,128 +359,6 @@ def st_block_buildings(
                 st.session_state[f"building_entries[{block_uuid}]"] = building_entries
                 st.rerun()
 
-            st_add_buildings = st.empty()
-
-    return st_metrics, st_add_buildings
-
-
-def get_blocks() -> tuple[
-    list[list[BuildingCount]], dict[str, int], dict[str, tuple[int, int]]
-]:
-    def count(building_uuid: str) -> BuildingCount | None:
-        match st.session_state.get(f"building[{building_uuid}].name", None):
-            case str(name):
-                bname = Bname(name)
-            case _:
-                return None
-        match st.session_state.get(f"building[{building_uuid}].count", None):
-            case int(count):
-                pass
-            case _:
-                return None
-        match st.session_state.get(
-            f"building[{building_uuid}].settings.{bname}.takes", None
-        ):
-            case list() as takes:  # pyright: ignore[reportUnknownVariableType]
-                items: set[Item] = {Item(i) for i in takes}  # pyright: ignore[reportUnknownVariableType]
-            case _:
-                return None
-        building = building_from_name(bname)
-        return BuildingCount(
-            count,
-            ConfiguredGenericBuilding(
-                building,
-                items,
-                building.get_make_items(),
-                1.0,
-            ),
-        )
-
-    blocks = {
-        block_uuid: {
-            building_uuid: count(building_uuid)
-            for building_uuid in st.session_state.get(
-                f"building_entries[{block_uuid}]", []
-            )
-        }
-        # TODO i guess make functions that are typed for these accessors, and getset for keep alive?
-        for block_uuid in st.session_state.get("block_entries", dict()).values()
-    }
-
-    blocks = {
-        block_uuid: {
-            uuid: building for uuid, building in block.items() if building is not None
-        }
-        for block_uuid, block in blocks.items()
-    }
-
-    block_indices = {uuid: i for i, uuid in enumerate(blocks)}
-
-    building_indices = {
-        uuid: (i, j)
-        for i, block in enumerate(blocks.values())
-        for j, uuid in enumerate(block)
-    }
-
-    blocks = [list(block.values()) for block in blocks.values()]
-
-    return blocks, block_indices, building_indices
-
-
-def st_backfill_solution(
-    st_meta: DeltaGenerator | None,
-    block_uuid: str | None,
-    st_metrics: dict[str, DeltaGenerator],
-    st_add_buildings: DeltaGenerator | None,
-    blocks: list[list[BuildingCount]],
-    block_indices: dict[str, int],
-    building_indices: dict[str, tuple[int, int]],
-    allocated: list[list[Allocated]],
-):
-    if st_meta is not None and block_uuid in block_indices:
-        i = block_indices[block_uuid]
-        with st_meta.container():
-            with st.expander("imports", expanded=True):
-                st_ivec(
-                    isum(alloc.take_remote for alloc in allocated[i]),
-                )
-            with st.expander("local", expanded=True):
-                st_ivec(
-                    isum(alloc.make_local() for alloc in allocated[i]),
-                )
-            with st.expander("exports", expanded=True):
-                st_ivec(
-                    isum(alloc.make_remote() for alloc in allocated[i]),
-                )
-
-    for uuid, dg in st_metrics.items():
-        if uuid not in building_indices:
-            continue  # buildings with no count or no type yet have no solved-for allocation
-        i, j = building_indices[uuid]
-        alloc = allocated[i][j]
-        building = blocks[i][j]
-        with dg.container(horizontal=True, width="content"):
-            if math.ceil(building.count * alloc.stable_usage) < building.count:
-                st.markdown(":material/remove:")
-            elif alloc.is_infinite:
-                st.markdown(":material/all_inclusive:")
-            elif alloc.stable_usage < 1.0:
-                st.markdown(":material/check:")
-            else:
-                st.markdown(":material/add:")
-            st.markdown(
-                f"**{round(alloc.stable_usage * 100)}%**",
-                width=40,
-                text_alignment="right",
-            )
-            st.markdown(
-                f":small[+{round((alloc.flood_usage - alloc.stable_usage) * 100)}%]",
-                width=40,
-                text_alignment="right",
-            )
-
-    if st_add_buildings is not None and block_uuid is not None:
-        with st_add_buildings.container(horizontal=True):
             i = block_indices[block_uuid]
             block = blocks[i]
             all_take = {item for building in block for item in building.building.takes}
@@ -375,6 +385,54 @@ def st_backfill_solution(
                         st.rerun()
 
 
+def get_blocks() -> tuple[
+    list[list[BuildingCount]], dict[str, int], dict[str, tuple[int, int]]
+]:
+    def count(uuid: str) -> BuildingCount | None:
+        name = state_get_building_name(uuid)
+        if name is None:
+            return None
+        count = state_get_building_count(uuid)
+        takes = state_get_building_takes(uuid, name)
+        building = building_from_name(name)
+        return BuildingCount(
+            count,
+            ConfiguredGenericBuilding(
+                building,
+                set(takes),
+                building.get_make_items(),
+                1.0,
+            ),
+        )
+
+    blocks = {
+        block_uuid: {
+            building_uuid: count(building_uuid)
+            for building_uuid in state_get_building_entries(block_uuid)
+        }
+        for block_uuid in state_get_block_entries().values()
+    }
+
+    blocks = {
+        block_uuid: {
+            uuid: building for uuid, building in block.items() if building is not None
+        }
+        for block_uuid, block in blocks.items()
+    }
+
+    block_indices = {uuid: i for i, uuid in enumerate(blocks)}
+
+    building_indices = {
+        uuid: (i, j)
+        for i, block in enumerate(blocks.values())
+        for j, uuid in enumerate(block)
+    }
+
+    blocks = [list(block.values()) for block in blocks.values()]
+
+    return blocks, block_indices, building_indices
+
+
 def main():
     st.set_page_config(
         page_icon=":material/table:",
@@ -382,15 +440,15 @@ def main():
         layout="wide",
     )
 
-    keep_state_alive()
-
-    with st.container(border=False, gap="xxsmall"):
-        block_uuid = st_select_block()
-        st.divider()
-        st_meta, block_uuid, st_metrics, st_add_buildings = st_block(block_uuid)
+    ensure_state()
 
     blocks, block_indices, building_indices = get_blocks()
     allocated, status = solve(blocks)
+
+    with st.container(border=False, gap="xxsmall"):
+        st_select_block()
+        st.divider()
+        st_block(blocks, block_indices, building_indices, allocated)
 
     with st.sidebar:
         st.subheader("total exports")
@@ -399,17 +457,6 @@ def main():
         )
         st.divider()
         st.markdown(f":small[{status}]")
-
-    st_backfill_solution(
-        st_meta,
-        block_uuid,
-        st_metrics,
-        st_add_buildings,
-        blocks,
-        block_indices,
-        building_indices,
-        allocated,
-    )
 
 
 if __name__ == "__main__":
