@@ -459,6 +459,17 @@ def main():
         st.markdown(f":small[{status}]")
 
 
+# TODO problems
+# ordering of buildings, finding them, and not duplicating for those where it doesnt make sense?
+# adding tab, or renaming, resets to viewing the first tab
+# adding a building doesnt fokus on the name selection, but maybe there are buttons for adding the right one in the first place?
+# save all the time, keep a timeline? save version to load old stuff?
+# order buildings, by feed-into-order?
+# when gaming out a new addition, would be nice to see the diff until "confirmed", or todo add click checkboxes
+#    (almost like a new block, and then merge it in when done)
+#    and/or a way for the blocks to be repeated, this is how you play it usually
+# TODO when buildings are there but with 0 count, then the add/remove/inf indicators are off
+
 if __name__ == "__main__":
     # NOTE this would be better, but streamlit's magic fails to do reloads correctly then
     # from widelands_planner.app import main
