@@ -642,12 +642,26 @@ def st_main():
 
     match ss.solution:
         case Solution() as sol:
-            # TODO sol.status should say cached or so
-            st.info("solution loaded")
+            # TODO make a button to force cold-start
+            # TODO same uuids, and same building types! only counts and settings can change
+            # TODO add the info for warm/cold and co in sidebar stats, not as st.infos, but keep loaded from url
+            # TODO dont duplicate code
+            _blocks, block_indices, building_indices = get_blocks()
+            if (
+                block_indices == sol.block_indices
+                and building_indices == sol.building_indices
+            ):
+                sol = get_solution()
+                ss.solution = sol
+                ss.refreshed = True
+                ss.solve_count += 1
+                st.info("Computed warm-start solution.")
+            else:
+                st.info("Solution computation delayed.")
         case _:
             sol = get_solution()
             ss.solution = sol
-            st.warning("solution computed")
+            st.warning("Computed cold-start solution.")
 
     with st.container(border=False, gap="xxsmall"):
         st_select_block()
