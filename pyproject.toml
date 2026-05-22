@@ -13,6 +13,7 @@ dependencies = [
     # "polars[style]>=1.39.0",
     # "pyinstrument>=5.1.2",
     # "qpsolvers[clarabel]>=4.11.0",
+    "pandas-stubs>=3.0.0.260204",
     "rich>=15.0.0",
     "streamlit>=1.55.0",
     "tabulate>=0.10.0",

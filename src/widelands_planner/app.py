@@ -10,7 +10,7 @@ from functools import partial
 from typing import Final
 from uuid import uuid4
 
-import pandas as pd  # pyright: ignore[reportMissingTypeStubs]
+import pandas as pd
 import streamlit as st
 
 from widelands_planner.app_data import Solution
@@ -204,7 +204,7 @@ def st_ivec(ivec: Ivec):
     # but we could just use polars to inject html? more control
     # it just needs some work to fit into the streamlit visual design
     st.table(  # pyright: ignore[reportUnknownMemberType]
-        df.style.format(  # pyright: ignore[reportUnknownMemberType]
+        df.style.format(
             {
                 "i/min": colored("{:.1f}"),
             }
