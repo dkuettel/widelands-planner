@@ -376,8 +376,7 @@ def st_block():
 
 
 def colored(m: str) -> str:
-    refreshed: bool = st.session_state.get("refreshed", False)
-    if refreshed:
+    if ss.refreshed:
         return m
     return f":gray[{m}]"
 
@@ -650,8 +649,8 @@ def st_main():
                 st.markdown(f":small[Rendered in {round(dt / 1e6)}ms]")
                 st.markdown(f":small[{sol.status}]")
 
-    if st.session_state.get("refreshed", False):
-        st.session_state["refreshed"] = False
+    if ss.refreshed:
+        ss.refreshed = False
         return
 
     ss.delay_refresh = True
