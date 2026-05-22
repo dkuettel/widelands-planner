@@ -21,7 +21,6 @@ from widelands_planner.state import (
     ConfiguredGenericBuilding,
     Item,
     Ivec,
-    SolutionStatus,
     building_from_name,
     isum,
     solve,
@@ -571,6 +570,13 @@ def st_totals(sol: Solution):
         )
 
 
+def get_solution() -> Solution:
+    blocks, block_indices, building_indices = get_blocks()
+    allocated, status = solve(blocks)
+    # TODO set revision?
+    return Solution(1, blocks, block_indices, building_indices, allocated, status)
+
+
 # a hack that could work: https://gist.github.com/Alyxion/7880aaa0c9f6036c23d94461d3a8fa6c
 # but streamlit is working on adding background tasks anyway, lets wait
 @st.fragment(run_every=0.1)
@@ -581,11 +587,7 @@ def st_refresh():
     if ss.delay_refresh:
         ss.delay_refresh = False
         return
-    blocks, block_indices, building_indices = get_blocks()
-    allocated, status = solve(blocks)
-    ss.solution = Solution(
-        1, blocks, block_indices, building_indices, allocated, status
-    )
+    ss.solution = get_solution()
     ss.refreshed = True
     ss.solve_count += 1
     st.rerun(scope="app")
@@ -626,12 +628,7 @@ def st_main():
             # TODO sol.status should say cached or so
             st.info("solution loaded")
         case _:
-            # TODO repeated code with below
-            blocks, block_indices, building_indices = get_blocks()
-            allocated, status = solve(blocks)
-            sol = Solution(
-                1, blocks, block_indices, building_indices, allocated, status
-            )
+            sol = get_solution()
             ss.solution = sol
             st.warning("solution computed")
 
