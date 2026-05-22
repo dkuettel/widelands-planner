@@ -570,8 +570,6 @@ def st_totals(sol: Solution):
         st_ivec(
             isum(alloc.make_remote() for block in sol.allocated for alloc in block),
         )
-        st.divider()
-        st.markdown(f":small[{sol.status}]")
 
 
 # a hack that could work: https://gist.github.com/Alyxion/7880aaa0c9f6036c23d94461d3a8fa6c
@@ -607,12 +605,20 @@ def st_main():
     ensure_state()
     set_url_from_state()
 
+    ss.render_count += 1
+    ss.revision = ss.revision + 1  # TODO can we do it only on actual changes?
+
     with st.sidebar:
-        ss.render_count += 1
-        st.markdown(f":small[Rendered {ss.render_count} times.]")
-        st.markdown(f":small[Solved {ss.solve_count} times.]")
-        ss.revision = ss.revision + 1  # TODO can we do it only on actual changes?
-        st.markdown(f":small[On revision {ss.revision}.]")
+        if st.toggle("show stats", key="stats", value=True):
+            st_stats = st.container(gap="xxsmall")
+        else:
+            st_stats = None
+        st.divider()
+        if st_stats:
+            with st_stats:
+                st.markdown(f":small[Rendered {ss.render_count} times.]")
+                st.markdown(f":small[Solved {ss.solve_count} times.]")
+                st.markdown(f":small[On revision {ss.revision}.]")
 
     # TODO find a way to resume iterations, most of the time this should be quite cheap?
 
@@ -638,8 +644,11 @@ def st_main():
     with st.sidebar:
         st_totals(sol)
 
-        dt = time.perf_counter_ns() - dt
-        st.markdown(f":small[Rendered in {round(dt / 1e6)}ms]")
+        if st_stats:
+            with st_stats:
+                dt = time.perf_counter_ns() - dt
+                st.markdown(f":small[Rendered in {round(dt / 1e6)}ms]")
+                st.markdown(f":small[{sol.status}]")
 
     if st.session_state.get("refreshed", False):
         st.session_state["refreshed"] = False
