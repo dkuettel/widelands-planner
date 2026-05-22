@@ -86,8 +86,11 @@ class SessionState:
     def block_name(self, v: str | None):
         st.session_state[self.key_block_name] = v
 
+    def key_building_name(self, uuid: str) -> str:
+        return f"state.building[{uuid}].name"
+
     def get_building_name(self, uuid: str) -> Bname | None:
-        match st.session_state.get(f"state.building[{uuid}].name", None):
+        match st.session_state.get(self.key_building_name(uuid), None):
             case str(s):
                 if s in Bname:
                     return Bname(s)
@@ -98,20 +101,24 @@ class SessionState:
     def set_building_name(self, uuid: str, name: Bname | None):
         match name:
             case None:
-                st.session_state[f"state.building[{uuid}].name"] = None
+                st.session_state[self.key_building_name(uuid)] = None
             case Bname():
-                st.session_state[f"state.building[{uuid}].name"] = name.value
+                st.session_state[self.key_building_name(uuid)] = name.value
+
+    def key_building_count(self, uuid: str) -> str:
+        return f"state.building[{uuid}].count"
 
     def get_building_count(self, uuid: str) -> int:
-        return st.session_state.get(f"state.building[{uuid}].count", 0)
+        return st.session_state.get(self.key_building_count(uuid), 0)
 
     def set_building_count(self, uuid: str, count: int):
         st.session_state[f"state.building[{uuid}].count"] = count
 
+    def key_building_takes(self, uuid: str, name: Bname) -> str:
+        return f"state.building[{uuid}].settings.{name}.takes"
+
     def get_building_takes(self, uuid: str, name: Bname) -> list[Item]:
-        value = st.session_state.get(
-            f"state.building[{uuid}].settings.{name}.takes", None
-        )
+        value = st.session_state.get(self.key_building_takes(uuid, name), None)
         match value:
             case list():
                 value = list(map(str, value))  # pyright: ignore[reportUnknownArgumentType]
@@ -124,9 +131,7 @@ class SessionState:
                 return sorted(building.get_take_items())
 
     def set_building_takes(self, uuid: str, name: Bname, value: list[Item]):
-        st.session_state[f"state.building[{uuid}].settings.{name}.takes"] = [
-            i.value for i in value
-        ]
+        st.session_state[self.key_building_takes(uuid, name)] = [i.value for i in value]
 
     @property
     def render_count(self) -> int:
@@ -354,7 +359,7 @@ def st_block():
         st_meta(block_uuid)
 
     with buildings:
-        st_block_buildings(block_uuid)
+        st_buildings(block_uuid)
 
 
 def colored(m: str) -> str:
@@ -364,7 +369,7 @@ def colored(m: str) -> str:
     return f":gray[{m}]"
 
 
-def st_block_buildings(block_uuid: str):
+def st_buildings(block_uuid: str):
     match ss.solution:
         case None:
             sol = Solution(
@@ -383,7 +388,7 @@ def st_block_buildings(block_uuid: str):
             with hcontainer(vertical_alignment="center", border=False):
                 st.number_input(
                     "count",
-                    key=f"building[{building_uuid}].count",
+                    key=ss.key_building_count(building_uuid),
                     min_value=0,
                     label_visibility="collapsed",
                     width=150,
@@ -427,7 +432,7 @@ def st_block_buildings(block_uuid: str):
                     "name",
                     sorted(i.value for i in Bname),
                     index=None,
-                    key=f"building[{building_uuid}].name",
+                    key=ss.key_building_name(building_uuid),
                     label_visibility="collapsed",
                     width=250,
                 )
@@ -449,7 +454,7 @@ def st_block_buildings(block_uuid: str):
                                 items,
                                 selection_mode="multi",
                                 default=items,
-                                key=f"building[{building_uuid}].settings.{bname}.takes",
+                                key=f"state.building[{building_uuid}].settings.{bname}.takes",
                             )
 
                 st.button(
