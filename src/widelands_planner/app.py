@@ -4,14 +4,14 @@ import json
 import math
 import os
 import time
-from dataclasses import dataclass
+import zlib
+from base64 import b64decode, b64encode
 from functools import partial
-from typing import Final, Protocol, override
+from typing import Final
 from uuid import uuid4
 
 import pandas as pd  # pyright: ignore[reportMissingTypeStubs]
 import streamlit as st
-from streamlit.delta_generator import DeltaGenerator
 
 from widelands_planner.app_data import Solution
 from widelands_planner.state import (
@@ -286,13 +286,14 @@ def maybe_get_state_from_url():
     match st.query_params.get("state", None):
         case None:
             return
-        case str(data):
+        case str(base):
             try:
-                # TODO check more with msgspec or so?
-                state = json.loads(data)
-            except json.decoder.JSONDecodeError:
+                compressed = b64decode(base.encode())
+                state_json = zlib.decompress(compressed).decode()
+                state = json.loads(state_json)
+            except Exception:
                 st.warning(
-                    "Cannot load state from url. The value of `state` is not a valid json."
+                    "Cannot load state from url. The value of `state` is not a valid data."
                 )
                 return
         case _:
@@ -311,38 +312,10 @@ def set_url_from_state():
         for (key, value) in st.session_state.items()
         if str(key).startswith("state")
     }
-    # TODO we could also just make it one big compressed base64 or so
     state_json = json.dumps(state)
-    # TODO if this is slow, only do it on a toggle
-    st.query_params["state"] = state_json
-
-
-class Backfill(Protocol):
-    def __call__(self, sol: Solution):
-        pass
-
-
-@dataclass(frozen=True)
-class BackfillMeta(Backfill):
-    block_uuid: str
-    meta: DeltaGenerator
-
-    @override
-    def __call__(self, sol: Solution):
-        with self.meta.container():
-            i = sol.block_indices[self.block_uuid]
-            with st.expander("imports", expanded=True):
-                st_ivec(
-                    isum(alloc.take_remote for alloc in sol.allocated[i]),
-                )
-            with st.expander("local", expanded=True):
-                st_ivec(
-                    isum(alloc.make_local() for alloc in sol.allocated[i]),
-                )
-            with st.expander("exports", expanded=True):
-                st_ivec(
-                    isum(alloc.make_remote() for alloc in sol.allocated[i]),
-                )
+    compressed = zlib.compress(state_json.encode())
+    base = b64encode(compressed).decode()
+    st.query_params["state"] = base
 
 
 def st_meta(block_uuid: str):
