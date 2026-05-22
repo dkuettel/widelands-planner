@@ -6,6 +6,7 @@ import os
 import time
 import zlib
 from base64 import b64decode, b64encode
+from collections.abc import Callable
 from functools import partial
 from typing import Final
 from uuid import uuid4
@@ -213,6 +214,11 @@ def st_ivec(ivec: Ivec):
     )
 
 
+def callback(fn: Callable[[], None]) -> Callable[[], None]:
+    """statically makes sure the callback has no arguments left unset"""
+    return fn
+
+
 def add_building(block_uuid: str, name: Bname | None, count: int | None):
     uuid = uuid4().hex
     ss.buildings.setdefault(block_uuid, []).append(uuid)
@@ -246,7 +252,7 @@ def st_select_block():
             "remove block",
             key="remove block",
             disabled=block_name is None,
-            on_click=remove_block,
+            on_click=callback(remove_block),
         )
 
     if block_name is None:
@@ -460,7 +466,9 @@ def st_buildings(block_uuid: str):
                 st.button(
                     ":material/delete:",
                     key=f"remove building[{building_uuid}]",
-                    on_click=partial(delete_building, block_uuid, building_uuid),
+                    on_click=callback(
+                        partial(delete_building, block_uuid, building_uuid)
+                    ),
                 )
 
                 if bname is not None and building is not None:
@@ -480,7 +488,7 @@ def st_buildings(block_uuid: str):
             st.button(
                 "add building",
                 key="add building",
-                on_click=partial(add_building, block_uuid, None, None),
+                on_click=callback(partial(add_building, block_uuid, None, None)),
             )
 
             if block_uuid in sol.block_indices:
@@ -500,7 +508,9 @@ def st_buildings(block_uuid: str):
                             f":material/add: {bname.value}",
                             key=f"add building {bname}",
                             type="tertiary",
-                            on_click=partial(add_building, block_uuid, bname, 1),
+                            on_click=callback(
+                                partial(add_building, block_uuid, bname, 1)
+                            ),
                         )
 
 
