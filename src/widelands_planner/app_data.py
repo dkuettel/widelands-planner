@@ -19,3 +19,14 @@ class Solution:
     building_indices: dict[str, tuple[int, int]]
     allocated: list[list[Allocated]]
     status: SolutionStatus
+
+    @classmethod
+    def from_empty(cls):
+        return cls(
+            revision=0,
+            blocks=[],
+            block_indices=dict(),
+            building_indices=dict(),
+            allocated=[],
+            status=SolutionStatus(True, 0, 0),
+        )

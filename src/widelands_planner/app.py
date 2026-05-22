@@ -326,7 +326,7 @@ def set_url_from_state():
 def st_meta(block_uuid: str):
     sol = ss.solution
     if sol is None:
-        return
+        sol = Solution.from_empty()
     match sol.block_indices.get(block_uuid, None):
         case None:
             return
@@ -372,14 +372,7 @@ def colored(m: str) -> str:
 def st_buildings(block_uuid: str):
     match ss.solution:
         case None:
-            sol = Solution(
-                revision=0,
-                blocks=[],
-                block_indices=dict(),
-                building_indices=dict(),
-                allocated=[],
-                status=SolutionStatus(True, 0, 0),
-            )
+            sol = Solution.from_empty()
         case Solution() as sol:
             pass
 
