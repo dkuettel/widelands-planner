@@ -213,8 +213,15 @@ def st_ivec(ivec: Ivec):
     )
 
 
-def add_building(block_uuid: str):
-    ss.buildings.setdefault(block_uuid, []).append(uuid4().hex)
+def add_building(block_uuid: str, name: Bname | None, count: int | None):
+    uuid = uuid4().hex
+    ss.buildings.setdefault(block_uuid, []).append(uuid)
+    match name, count:
+        case Bname(), int():
+            ss.set_building_name(uuid, name)
+            ss.set_building_count(uuid, count)
+        case _:
+            pass
 
 
 def delete_building(block_uuid: str, building_uuid: str):
@@ -473,7 +480,7 @@ def st_buildings(block_uuid: str):
             st.button(
                 "add building",
                 key="add building",
-                on_click=partial(add_building, block_uuid),
+                on_click=partial(add_building, block_uuid, None, None),
             )
 
             if block_uuid in sol.block_indices:
@@ -489,22 +496,12 @@ def st_buildings(block_uuid: str):
                 for bname in Bname:
                     building = building_from_name(bname)
                     if missing_items & building.get_make_items():
-                        if st.button(
+                        st.button(
                             f":material/add: {bname.value}",
                             key=f"add building {bname}",
                             type="tertiary",
-                        ):
-                            building_entries = st.session_state.get(
-                                f"building_entries[{block_uuid}]", []
-                            )
-                            uuid = uuid4().hex
-                            building_entries.append(uuid)
-                            st.session_state[f"building_entries[{block_uuid}]"] = (
-                                building_entries
-                            )
-                            st.session_state[f"building[{uuid}].name"] = bname.value
-                            st.session_state[f"building[{uuid}].count"] = 1
-                            st.rerun()
+                            on_click=partial(add_building, block_uuid, bname, 1),
+                        )
 
 
 def get_blocks() -> tuple[
