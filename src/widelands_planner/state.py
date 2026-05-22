@@ -2170,10 +2170,29 @@ class SolverState:
     consumption: farray
 
 
-def solver_state_from_blocks(blocks: list[list[BuildingCount]]) -> SolverState:
+@dataclass(frozen=True)
+class ResumeState:
+    index: list[tuple[int, int]]
+    production: farray
+    consumption: farray
+
+
+def solver_state_from_blocks(
+    blocks: list[list[BuildingCount]], resume: ResumeState | None
+) -> SolverState:
     B: Final = len(blocks)
     N: Final = max((len(block) for block in blocks), default=0)
     I: Final = len(Item)
+
+    if resume is not None:
+        assert resume.production.shape == (B, N, 2, 2, I)
+        assert resume.consumption.shape == (B, N, 2, I)
+        return SolverState(
+            [building for block in blocks for building in block],
+            resume.index,
+            resume.production,
+            resume.consumption,
+        )
 
     # maps a flat building to its entry in production and consumption (first two indices)
     index: list[tuple[int, int]] = []
@@ -2234,12 +2253,18 @@ class SolutionStatus:
 
 
 def solve(
-    blocks: list[list[BuildingCount]],
-) -> tuple[list[list[Allocated]], SolutionStatus]:
+    blocks: list[list[BuildingCount]], resume: ResumeState | None
+) -> tuple[list[list[Allocated]], SolutionStatus, ResumeState]:
+    """
+    Resume is only possible if it is the the exact same blocks and buildings
+    with potentially different counts and settings for some buildings.
+    Some sanity checks happen, but behavior is undefined if that requirement is not met.
+    """
+
     dt = time.perf_counter_ns()
 
     prev_state = None
-    state = solver_state_from_blocks(blocks)
+    state = solver_state_from_blocks(blocks, resume)
     flooded_state = state
     leaf_items: set[Item] = set()
 
@@ -2278,8 +2303,12 @@ def solve(
 
     ms = (time.perf_counter_ns() - dt) / 1e6
 
-    return listed_blocks, SolutionStatus(
-        converged=True, iterations=count, milliseconds=round(ms)
+    resume = ResumeState(state.index, state.production, state.consumption)
+
+    return (
+        listed_blocks,
+        SolutionStatus(converged=True, iterations=count, milliseconds=round(ms)),
+        resume,
     )
 
 

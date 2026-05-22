@@ -8,7 +8,12 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from widelands_planner.state import Allocated, BuildingCount, SolutionStatus
+from widelands_planner.state import (
+    Allocated,
+    BuildingCount,
+    ResumeState,
+    SolutionStatus,
+)
 
 
 @dataclass(frozen=True)
@@ -19,6 +24,7 @@ class Solution:
     building_indices: dict[str, tuple[int, int]]
     allocated: list[list[Allocated]]
     status: SolutionStatus
+    resume: ResumeState | None
 
     @classmethod
     def from_empty(cls):
@@ -29,4 +35,5 @@ class Solution:
             building_indices=dict(),
             allocated=[],
             status=SolutionStatus(True, 0, 0),
+            resume=None,
         )

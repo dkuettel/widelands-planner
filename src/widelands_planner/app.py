@@ -572,9 +572,28 @@ def st_totals(sol: Solution):
 
 def get_solution() -> Solution:
     blocks, block_indices, building_indices = get_blocks()
-    allocated, status = solve(blocks)
+    match ss.solution:
+        case Solution() as sol:
+            if (
+                block_indices == sol.block_indices
+                and building_indices == sol.building_indices
+            ):
+                resume = sol.resume
+            else:
+                resume = None
+        case None:
+            resume = None
+    allocated, status, resume = solve(blocks, resume)
     # TODO set revision?
-    return Solution(1, blocks, block_indices, building_indices, allocated, status)
+    return Solution(
+        1,
+        blocks,
+        block_indices,
+        building_indices,
+        allocated,
+        status,
+        resume,
+    )
 
 
 # a hack that could work: https://gist.github.com/Alyxion/7880aaa0c9f6036c23d94461d3a8fa6c
@@ -620,8 +639,6 @@ def st_main():
                 st.markdown(f":small[Rendered {ss.render_count} times.]")
                 st.markdown(f":small[Solved {ss.solve_count} times.]")
                 st.markdown(f":small[On revision {ss.revision}.]")
-
-    # TODO find a way to resume iterations, most of the time this should be quite cheap?
 
     match ss.solution:
         case Solution() as sol:
