@@ -121,8 +121,8 @@ def get_state() -> State:
             return State.from_new()
         case State() as state:
             return state
-        case _:
-            assert False
+        case _ as what:
+            assert False, what
 
 
 key_block_name: Final = "block_name"
@@ -477,30 +477,35 @@ def st_block_buildings(
                 on_click=partial(add_building, block_uuid),
             )
 
-            i = block_indices[block_uuid]
-            block = blocks[i]
-            all_take = {item for building in block for item in building.building.takes}
-            all_make = {item for building in block for item in building.building.makes}
-            missing_items = all_take - all_make
-            for bname in Bname:
-                building = building_from_name(bname)
-                if missing_items & building.get_make_items():
-                    if st.button(
-                        f":material/add: {bname.value}",
-                        key=f"add building {bname}",
-                        type="tertiary",
-                    ):
-                        building_entries = st.session_state.get(
-                            f"building_entries[{block_uuid}]", []
-                        )
-                        uuid = uuid4().hex
-                        building_entries.append(uuid)
-                        st.session_state[f"building_entries[{block_uuid}]"] = (
-                            building_entries
-                        )
-                        st.session_state[f"building[{uuid}].name"] = bname.value
-                        st.session_state[f"building[{uuid}].count"] = 1
-                        st.rerun()
+            if block_uuid in block_indices:
+                i = block_indices[block_uuid]
+                block = blocks[i]
+                all_take = {
+                    item for building in block for item in building.building.takes
+                }
+                all_make = {
+                    item for building in block for item in building.building.makes
+                }
+                missing_items = all_take - all_make
+                for bname in Bname:
+                    building = building_from_name(bname)
+                    if missing_items & building.get_make_items():
+                        if st.button(
+                            f":material/add: {bname.value}",
+                            key=f"add building {bname}",
+                            type="tertiary",
+                        ):
+                            building_entries = st.session_state.get(
+                                f"building_entries[{block_uuid}]", []
+                            )
+                            uuid = uuid4().hex
+                            building_entries.append(uuid)
+                            st.session_state[f"building_entries[{block_uuid}]"] = (
+                                building_entries
+                            )
+                            st.session_state[f"building[{uuid}].name"] = bname.value
+                            st.session_state[f"building[{uuid}].count"] = 1
+                            st.rerun()
 
 
 def get_blocks() -> tuple[
