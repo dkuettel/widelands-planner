@@ -664,20 +664,23 @@ def st_main():
 
     match ss.solution:
         case Solution() as sol:
-            # TODO make a button to force cold-start
-            # TODO add the info for warm/cold and co in sidebar stats, not as st.infos, but keep loaded from url
-            # TODO _blocks and co could be reused for get_solution, its not doing much anymore
-            _blocks, _block_indices, _building_indices, _building_names, resume = (
-                maybe_get_resume()
-            )
-            if resume is None:
-                st.info("Solution computation delayed.")
+            if ss.refreshed:
+                st.info("Cold-start solution computed in the background.")
             else:
-                sol = get_solution()
-                ss.solution = sol
-                ss.refreshed = True
-                ss.solve_count += 1
-                st.info("Computed warm-start solution.")
+                # TODO make a button to force cold-start
+                # TODO add the info for warm/cold and co in sidebar stats, not as st.infos, but keep loaded from url
+                # TODO _blocks and co could be reused for get_solution, its not doing much anymore
+                _blocks, _block_indices, _building_indices, _building_names, resume = (
+                    maybe_get_resume()
+                )
+                if resume is None:
+                    st.info("Solution computation delayed.")
+                else:
+                    sol = get_solution()
+                    ss.solution = sol
+                    ss.refreshed = True
+                    ss.solve_count += 1
+                    st.info("Computed warm-start solution.")
         case _:
             sol = get_solution()
             ss.solution = sol
