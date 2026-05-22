@@ -517,6 +517,7 @@ def get_blocks() -> tuple[
     list[list[BuildingCount]],
     dict[str, int],
     dict[str, tuple[int, int]],
+    dict[str, Bname],
 ]:
     def count(uuid: str) -> BuildingCount | None:
         name = ss.get_building_name(uuid)
@@ -560,7 +561,12 @@ def get_blocks() -> tuple[
 
     blocks = [list(block.values()) for block in blocks.values()]
 
-    return blocks, block_indices, building_indices
+    building_names = {
+        uuid: blocks[i][j].building.building.name
+        for uuid, (i, j) in building_indices.items()
+    }
+
+    return blocks, block_indices, building_indices, building_names
 
 
 def st_totals(sol: Solution):
@@ -575,25 +581,29 @@ def maybe_get_resume() -> tuple[
     list[list[BuildingCount]],
     dict[str, int],
     dict[str, tuple[int, int]],
+    dict[str, Bname],
     ResumeState | None,
 ]:
-    blocks, block_indices, building_indices = get_blocks()
+    blocks, block_indices, building_indices, building_names = get_blocks()
     match ss.solution:
         case Solution() as sol:
             if (
+                # TODO we should actually check order, not just set-like equality
+                # TODO make get_blocks return an opaque signature instead? no its kinda double-purpose
                 block_indices == sol.block_indices
                 and building_indices == sol.building_indices
+                and building_names == sol.building_names
             ):
                 resume = sol.resume
             else:
                 resume = None
         case None:
             resume = None
-    return blocks, block_indices, building_indices, resume
+    return blocks, block_indices, building_indices, building_names, resume
 
 
 def get_solution() -> Solution:
-    blocks, block_indices, building_indices, resume = maybe_get_resume()
+    blocks, block_indices, building_indices, building_names, resume = maybe_get_resume()
     allocated, status, resume = solve(blocks, resume)
     # TODO set revision?
     return Solution(
@@ -601,6 +611,7 @@ def get_solution() -> Solution:
         blocks,
         block_indices,
         building_indices,
+        building_names,
         allocated,
         status,
         resume,
@@ -654,10 +665,11 @@ def st_main():
     match ss.solution:
         case Solution() as sol:
             # TODO make a button to force cold-start
-            # TODO same uuids, and same building types! only counts and settings can change
             # TODO add the info for warm/cold and co in sidebar stats, not as st.infos, but keep loaded from url
             # TODO _blocks and co could be reused for get_solution, its not doing much anymore
-            _blocks, _block_indices, _building_indices, resume = maybe_get_resume()
+            _blocks, _block_indices, _building_indices, _building_names, resume = (
+                maybe_get_resume()
+            )
             if resume is None:
                 st.info("Solution computation delayed.")
             else:

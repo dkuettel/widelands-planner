@@ -10,6 +10,7 @@ from dataclasses import dataclass
 
 from widelands_planner.state import (
     Allocated,
+    Bname,
     BuildingCount,
     ResumeState,
     SolutionStatus,
@@ -22,6 +23,7 @@ class Solution:
     blocks: list[list[BuildingCount]]
     block_indices: dict[str, int]
     building_indices: dict[str, tuple[int, int]]
+    building_names: dict[str, Bname]
     allocated: list[list[Allocated]]
     status: SolutionStatus
     resume: ResumeState | None
@@ -33,6 +35,7 @@ class Solution:
             blocks=[],
             block_indices=dict(),
             building_indices=dict(),
+            building_names=dict(),
             allocated=[],
             status=SolutionStatus(True, 0, 0),
             resume=None,
