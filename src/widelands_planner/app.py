@@ -4,24 +4,23 @@ import json
 import math
 import os
 import time
-from collections.abc import Callable
 from dataclasses import dataclass
-from functools import partial, wraps
-from typing import Concatenate, Final, Protocol, override
+from functools import partial
+from typing import Final, Protocol, override
 from uuid import uuid4
 
 import pandas as pd  # pyright: ignore[reportMissingTypeStubs]
 import streamlit as st
 from streamlit.delta_generator import DeltaGenerator
 
-from widelands_planner.app_data import Solution, State
+from widelands_planner.app_data import Solution
 from widelands_planner.state import (
-    Allocated,
     Bname,
     BuildingCount,
     ConfiguredGenericBuilding,
     Item,
     Ivec,
+    SolutionStatus,
     building_from_name,
     isum,
     solve,
@@ -46,6 +45,143 @@ def run():
             "src/widelands_planner/app.py",
         ],
     )
+
+
+class SessionState:
+    @property
+    def revision(self) -> int:
+        """every state change does +1"""
+        return st.session_state.get("state.revision", 0)
+
+    @revision.setter
+    def revision(self, v: int):
+        st.session_state["state.revision"] = v
+
+    @property
+    def blocks(self) -> dict[str, str]:
+        """blocks[name] = uuid"""
+        return st.session_state.get("state.blocks", dict())
+
+    @blocks.setter
+    def blocks(self, v: dict[str, str]):
+        st.session_state["state.blocks"] = v
+
+    @property
+    def buildings(self) -> dict[str, list[str]]:
+        """buildings[block uuid] = list of building uuids"""
+        return st.session_state.get("state.buildings", dict())
+
+    @buildings.setter
+    def buildings(self, v: dict[str, list[str]]):
+        st.session_state["state.buildings"] = v
+
+    key_block_name: Final = "block_name"
+
+    @property
+    def block_name(self) -> str | None:
+        """current block name to show"""
+        return st.session_state.get(self.key_block_name, None)
+
+    @block_name.setter
+    def block_name(self, v: str | None):
+        st.session_state[self.key_block_name] = v
+
+    def get_building_name(self, uuid: str) -> Bname | None:
+        match st.session_state.get(f"state.building[{uuid}].name", None):
+            case str(s):
+                if s in Bname:
+                    return Bname(s)
+                return None
+            case _:
+                return None
+
+    def set_building_name(self, uuid: str, name: Bname | None):
+        match name:
+            case None:
+                st.session_state[f"state.building[{uuid}].name"] = None
+            case Bname():
+                st.session_state[f"state.building[{uuid}].name"] = name.value
+
+    def get_building_count(self, uuid: str) -> int:
+        return st.session_state.get(f"state.building[{uuid}].count", 0)
+
+    def set_building_count(self, uuid: str, count: int):
+        st.session_state[f"state.building[{uuid}].count"] = count
+
+    def get_building_takes(self, uuid: str, name: Bname) -> list[Item]:
+        value = st.session_state.get(
+            f"state.building[{uuid}].settings.{name}.takes", None
+        )
+        match value:
+            case list():
+                value = list(map(str, value))  # pyright: ignore[reportUnknownArgumentType]
+                if all((i in Item) for i in value):
+                    return sorted(Item(i) for i in value)
+                building = building_from_name(name)
+                return sorted(building.get_take_items())
+            case _:
+                building = building_from_name(name)
+                return sorted(building.get_take_items())
+
+    def set_building_takes(self, uuid: str, name: Bname, value: list[Item]):
+        st.session_state[f"state.building[{uuid}].settings.{name}.takes"] = [
+            i.value for i in value
+        ]
+
+    @property
+    def render_count(self) -> int:
+        return st.session_state.get("render_count", 0)
+
+    @render_count.setter
+    def render_count(self, count: int):
+        st.session_state["render_count"] = count
+
+    @property
+    def loaded(self) -> bool:
+        return st.session_state.get("loaded", False)
+
+    @loaded.setter
+    def loaded(self, v: bool):
+        st.session_state["loaded"] = v
+
+    @property
+    def solution(self) -> Solution | None:
+        match st.session_state.get("solution", None):
+            case Solution() as sol:
+                return sol
+            case _:
+                return None
+
+    @solution.setter
+    def solution(self, sol: Solution | None):
+        st.session_state["solution"] = sol
+
+    @property
+    def delay_refresh(self) -> bool:
+        return st.session_state.get("delay_refresh", False)
+
+    @delay_refresh.setter
+    def delay_refresh(self, v: bool):
+        st.session_state["delay_refresh"] = v
+
+    @property
+    def refreshed(self) -> bool:
+        return st.session_state.get("refreshed", True)
+
+    @refreshed.setter
+    def refreshed(self, v: bool):
+        st.session_state["refreshed"] = v
+
+    @property
+    def solve_count(self) -> int:
+        return st.session_state.get("solve_count", 0)
+
+    @solve_count.setter
+    def solve_count(self, c: int):
+        st.session_state["solve_count"] = c
+
+
+ss: Final = SessionState()
 
 
 def st_ivec(ivec: Ivec):
@@ -73,32 +209,26 @@ def st_ivec(ivec: Ivec):
 
 
 def add_building(block_uuid: str):
-    state = get_state()
-    state.buildings.setdefault(block_uuid, []).append(uuid4().hex)
+    ss.buildings.setdefault(block_uuid, []).append(uuid4().hex)
 
 
 def delete_building(block_uuid: str, building_uuid: str):
-    state = get_state()
-    state.buildings.get(block_uuid, []).remove(building_uuid)
+    ss.buildings.get(block_uuid, []).remove(building_uuid)
 
 
 def st_select_block():
-    state = get_state()
-
     with hcontainer(vertical_alignment="bottom"):
         block_name = st.selectbox(
             "select or create block",
-            sorted(state.blocks),
+            sorted(ss.blocks),
             accept_new_options=True,
-            key=key_block_name,
+            key=ss.key_block_name,
             width=300,
         )
 
         def remove_block():
-            state = get_state()
-            state.blocks.pop(block_name or "", "")
-            [new_block_name, *_] = sorted(state.blocks) or [None]
-            state_set_block_name(new_block_name)
+            ss.blocks.pop(block_name or "", "")
+            [ss.block_name, *_] = sorted(ss.blocks) or [None]
 
         st.button(
             "remove block",
@@ -110,157 +240,81 @@ def st_select_block():
     if block_name is None:
         return
 
-    if block_name not in state.blocks:
-        state.blocks[block_name] = uuid4().hex
+    if block_name not in ss.blocks:
+        ss.blocks[block_name] = uuid4().hex
         st.rerun()
-
-
-def get_state() -> State:
-    match st.session_state.get("state", None):
-        case None:
-            return State.from_new()
-        case State() as state:
-            return state
-        case _ as what:
-            assert False, what
-
-
-key_block_name: Final = "block_name"
-
-
-def state_get_block_name() -> str | None:
-    return st.session_state.get(key_block_name, None)
-
-
-def state_set_block_name(value: str | None):
-    """current block uuid to show"""
-    st.session_state[key_block_name] = value
-
-
-def state_get_building_name(uuid: str) -> None | Bname:
-    value = st.session_state.get(f"building[{uuid}].name", None)
-    match value:
-        case None:
-            return None
-        case str():
-            if value in Bname:
-                return Bname(value)
-            return None
-        case _:
-            return None
-
-
-def state_set_building_name(uuid: str, value: None | Bname):
-    match value:
-        case None:
-            st.session_state[f"building[{uuid}].name"] = None
-        case Bname():
-            st.session_state[f"building[{uuid}].name"] = value.value
-
-
-def state_get_building_count(uuid: str) -> int:
-    value = st.session_state.get(f"building[{uuid}].count", 0)
-    match value:
-        case int():
-            return value
-        case _:
-            return 0
-
-
-def state_set_building_count(uuid: str, value: int):
-    st.session_state[f"building[{uuid}].count"] = value
-
-
-def state_get_building_takes(uuid: str, name: Bname) -> list[Item]:
-    value = st.session_state.get(f"building[{uuid}].settings.{name}.takes", None)
-    match value:
-        case list():
-            value = list(map(str, value))  # pyright: ignore[reportUnknownArgumentType]
-            if all((i in Item) for i in value):
-                return sorted(Item(i) for i in value)
-            building = building_from_name(name)
-            return sorted(building.get_take_items())
-        case None | _:
-            building = building_from_name(name)
-            return sorted(building.get_take_items())
-
-
-def state_set_building_takes(uuid: str, name: Bname, value: list[Item]):
-    st.session_state[f"building[{uuid}].settings.{name}.takes"] = [
-        i.value for i in value
-    ]
 
 
 def ensure_state():
     # NOTE just reading st.session_state doesnt make data persist, you have to set it too
 
-    state = get_state()
-    st.session_state["state"] = state
+    ss.loaded = True
 
-    if not state.blocks:
-        state.blocks = {"main": uuid4().hex}
+    ss.revision = ss.revision
 
-    for block_uuid in state.blocks.values():
-        for building_uuid in state.buildings.setdefault(block_uuid, []):
-            name = state_get_building_name(building_uuid)
-            state_set_building_name(building_uuid, name)
+    blocks = ss.blocks
+    if not blocks:
+        blocks = {"main": uuid4().hex}
+    ss.blocks = blocks
 
-            count = state_get_building_count(building_uuid)
-            state_set_building_count(building_uuid, count)
+    buildings = ss.buildings
+    ss.buildings = buildings
+
+    for block_uuid in blocks.values():
+        for building_uuid in buildings.setdefault(block_uuid, []):
+            name = ss.get_building_name(building_uuid)
+            ss.set_building_name(building_uuid, name)
+
+            count = ss.get_building_count(building_uuid)
+            ss.set_building_count(building_uuid, count)
 
             if name is not None:
-                takes = state_get_building_takes(building_uuid, name)
-                state_set_building_takes(building_uuid, name, takes)
+                takes = ss.get_building_takes(building_uuid, name)
+                ss.set_building_takes(building_uuid, name, takes)
+
+    ss.render_count = ss.render_count
+    ss.loaded = ss.loaded
+    ss.solution = ss.solution
+    ss.refreshed = ss.refreshed
+    ss.solve_count = ss.solve_count
 
 
-def maybe_get_session_from_url():
-    if "state" in st.session_state:
+def maybe_get_state_from_url():
+    if ss.loaded:
         return
 
-    match st.query_params.get("session", None):
+    match st.query_params.get("state", None):
         case None:
             return
-        case str(session_str):
+        case str(data):
             try:
-                # TODO check more with msgspec or so
-                session = json.loads(session_str)
+                # TODO check more with msgspec or so?
+                state = json.loads(data)
             except json.decoder.JSONDecodeError:
                 st.warning(
-                    "Cannot load state from url. The value of `session` is not a valid json."
+                    "Cannot load state from url. The value of `state` is not a valid json."
                 )
                 return
         case _:
-            st.warning(
-                "Cannot load state from url. The value of `session` is not `str`."
-            )
+            st.warning("Cannot load state from url. The value of `state` is not `str`.")
             return
 
-    st.session_state["state"] = State.from_session(session.pop("state"))
-
     # TODO is this a security problem that we just allow any state to be updated?
-    st.session_state.update(session)
+    st.session_state.update(state)
+
+    st.info("Loaded session from url.")
 
 
-def set_url_from_session():
-    # TODO instead make all strings "state...." and then much easier to load and save?
-    def is_session(key: str | int) -> bool:
-        key = str(key)
-        # if key in {"block_entries"}:
-        #     return True
-        # if key.startswith("building_entries["):
-        #     return True
-        if key.startswith("building["):
-            return True
-        return False
-
-    session = {
-        key: value for (key, value) in st.session_state.items() if is_session(key)
+def set_url_from_state():
+    state = {
+        key: value
+        for (key, value) in st.session_state.items()
+        if str(key).startswith("state")
     }
-    session["state"] = get_state().as_session()
     # TODO we could also just make it one big compressed base64 or so
-    session_str = json.dumps(session)
+    state_json = json.dumps(state)
     # TODO if this is slow, only do it on a toggle
-    st.query_params["session"] = session_str
+    st.query_params["state"] = state_json
 
 
 class Backfill(Protocol):
@@ -291,73 +345,43 @@ class BackfillMeta(Backfill):
                 )
 
 
-def st_meta(sol: Solution, block_uuid: str):
-    with st.container():
-        match sol.block_indices.get(block_uuid, None):
-            case None:
-                return
-            case int(i):
-                pass
-        with st.expander("imports", expanded=True):
-            st_ivec(
-                isum(alloc.take_remote for alloc in sol.allocated[i]),
-            )
-        with st.expander("local", expanded=True):
-            st_ivec(
-                isum(alloc.make_local() for alloc in sol.allocated[i]),
-            )
-        with st.expander("exports", expanded=True):
-            st_ivec(
-                isum(alloc.make_remote() for alloc in sol.allocated[i]),
-            )
+def st_meta(block_uuid: str):
+    sol = ss.solution
+    if sol is None:
+        return
+    match sol.block_indices.get(block_uuid, None):
+        case None:
+            return
+        case int(i):
+            pass
+    with st.expander("imports", expanded=True):
+        st_ivec(
+            isum(alloc.take_remote for alloc in sol.allocated[i]),
+        )
+    with st.expander("local", expanded=True):
+        st_ivec(
+            isum(alloc.make_local() for alloc in sol.allocated[i]),
+        )
+    with st.expander("exports", expanded=True):
+        st_ivec(
+            isum(alloc.make_remote() for alloc in sol.allocated[i]),
+        )
 
 
-@dataclass
-class Fill:
-    sol: Solution
-    runs: list[Callable[[Solution], None]]
-
-    def __call__[**P](
-        self, container: DeltaGenerator, fn: Callable[Concatenate[Solution, P], None]
-    ) -> Callable[P, None]:
-        container = container.empty()
-
-        @wraps(fn)
-        def wrapper(*args: P.args, **kwargs: P.kwargs):
-            def run(sol: Solution):
-                with container:
-                    fn(sol, *args, **kwargs)
-
-            self.runs.append(run)
-            run(self.sol)
-
-        return wrapper
-
-
-def st_block(fill: Fill):
-    block_name = state_get_block_name()
-    if block_name is None:
+def st_block():
+    if ss.block_name is None:
         st.warning("No block selected.")
         return
 
-    state = get_state()
-    block_uuid = state.blocks[block_name]
+    block_uuid = ss.blocks[ss.block_name]
 
     meta, buildings = st.columns([1, 4], gap="medium")
 
-    fill(meta, st_meta)(block_uuid)
+    with meta:
+        st_meta(block_uuid)
 
     with buildings:
-        # TODO this is pretty heavy, widgets are expensive
-        # so we could make fragments here? and just use as little as possible
-        # use non-eager popovers and stuff like that
-        st_block_buildings(
-            block_uuid,
-            fill.sol.blocks,
-            fill.sol.block_indices,
-            fill.sol.building_indices,
-            fill.sol.allocated,
-        )
+        st_block_buildings(block_uuid)
 
 
 def colored(m: str) -> str:
@@ -367,18 +391,22 @@ def colored(m: str) -> str:
     return f":gray[{m}]"
 
 
-def st_block_buildings(
-    block_uuid: str,
-    blocks: list[list[BuildingCount]],
-    block_indices: dict[str, int],
-    building_indices: dict[str, tuple[int, int]],
-    allocated: list[list[Allocated]],
-):
-    state = get_state()
-    building_entries = state.buildings[block_uuid]
+def st_block_buildings(block_uuid: str):
+    match ss.solution:
+        case None:
+            sol = Solution(
+                revision=0,
+                blocks=[],
+                block_indices=dict(),
+                building_indices=dict(),
+                allocated=[],
+                status=SolutionStatus(True, 0, 0),
+            )
+        case Solution() as sol:
+            pass
 
     with st.container(gap="xxsmall"):
-        for building_uuid in building_entries:
+        for building_uuid in ss.buildings[block_uuid]:
             with hcontainer(vertical_alignment="center", border=False):
                 st.number_input(
                     "count",
@@ -389,12 +417,12 @@ def st_block_buildings(
                 )
 
                 with st.container(width=140, horizontal=True):
-                    match building_indices.get(building_uuid, None):
+                    match sol.building_indices.get(building_uuid, None):
                         case None:
                             st.markdown(colored(":material/more_horiz:"))
                         case (int(i), int(j)):
-                            building = blocks[i][j]
-                            alloc = allocated[i][j]
+                            building = sol.blocks[i][j]
+                            alloc = sol.allocated[i][j]
                             if building.count == 0:
                                 st.markdown(colored(":material/warning:"))
                             elif (
@@ -477,9 +505,9 @@ def st_block_buildings(
                 on_click=partial(add_building, block_uuid),
             )
 
-            if block_uuid in block_indices:
-                i = block_indices[block_uuid]
-                block = blocks[i]
+            if block_uuid in sol.block_indices:
+                i = sol.block_indices[block_uuid]
+                block = sol.blocks[i]
                 all_take = {
                     item for building in block for item in building.building.takes
                 }
@@ -514,11 +542,11 @@ def get_blocks() -> tuple[
     dict[str, tuple[int, int]],
 ]:
     def count(uuid: str) -> BuildingCount | None:
-        name = state_get_building_name(uuid)
+        name = ss.get_building_name(uuid)
         if name is None:
             return None
-        count = state_get_building_count(uuid)
-        takes = state_get_building_takes(uuid, name)
+        count = ss.get_building_count(uuid)
+        takes = ss.get_building_takes(uuid, name)
         building = building_from_name(name)
         return BuildingCount(
             count,
@@ -530,14 +558,12 @@ def get_blocks() -> tuple[
             ),
         )
 
-    state = get_state()
-
     blocks = {
         block_uuid: {
             building_uuid: count(building_uuid)
-            for building_uuid in state.buildings[block_uuid]
+            for building_uuid in ss.buildings[block_uuid]
         }
-        for block_uuid in state.blocks.values()
+        for block_uuid in ss.blocks.values()
     }
 
     blocks = {
@@ -577,26 +603,20 @@ def st_refresh():
     # TODO this is a very cheap way to get a background process, it only happens once, but is detached
     # if on rapid fire reruns (clicking much) we could hold back somehow, that would be best
     # i think this gets killed maybe? but we could still check at the end if we are still relevant?
-    if st.session_state.get("first", False):
-        st.session_state["first"] = False
+    if ss.delay_refresh:
+        ss.delay_refresh = False
         return
     blocks, block_indices, building_indices = get_blocks()
     allocated, status = solve(blocks)
-    sol = Solution(1, blocks, block_indices, building_indices, allocated, status)
-    st.session_state["last_solution"] = sol
-    st.session_state["refreshed"] = True
-    st.session_state["solved"] = st.session_state.get("solved", 0) + 1
+    ss.solution = Solution(
+        1, blocks, block_indices, building_indices, allocated, status
+    )
+    ss.refreshed = True
+    ss.solve_count += 1
     st.rerun(scope="app")
 
 
 def st_main():
-    with st.sidebar:
-        count = st.session_state.get("render_count", 0) + 1
-        st.session_state["render_count"] = count
-        st.markdown(f":small[Rendered {count} times.]")
-        solved = st.session_state.get("solved", 0)
-        st.markdown(f":small[Solved {solved} times.]")
-
     dt = time.perf_counter_ns()
 
     st.set_page_config(
@@ -605,22 +625,23 @@ def st_main():
         layout="wide",
     )
 
-    maybe_get_session_from_url()
+    maybe_get_state_from_url()
     ensure_state()
-    set_url_from_session()
+    set_url_from_state()
+
+    with st.sidebar:
+        ss.render_count += 1
+        st.markdown(f":small[Rendered {ss.render_count} times.]")
+        st.markdown(f":small[Solved {ss.solve_count} times.]")
+        ss.revision = ss.revision + 1  # TODO can we do it only on actual changes?
+        st.markdown(f":small[On revision {ss.revision}.]")
 
     # TODO find a way to resume iterations, most of the time this should be quite cheap?
-    # actually wait, first we should see what happens if we keep the last state and solution
-    # and compute at the end and rerun if necessary? could be smooth enough? or no rerun but a backfill? is that possible easy and no flickering?
-    # reruns by everyone adding to a backfill list, then its the same function applied twice, does st flicker like that?
 
-    # TODO accessor for better typing?
-    # TODO also, just have one state class, faster to work with, keep keys only for widgets
-    match st.session_state.get("last_solution", None):
+    match ss.solution:
         case Solution() as sol:
             # TODO sol.status should say cached or so
-            st.info("loaded")
-            pass
+            st.info("solution loaded")
         case _:
             # TODO repeated code with below
             blocks, block_indices, building_indices = get_blocks()
@@ -628,18 +649,16 @@ def st_main():
             sol = Solution(
                 1, blocks, block_indices, building_indices, allocated, status
             )
-            st.session_state["last_solution"] = sol
-            st.warning("computed")
-
-    fill = Fill(sol, [])
+            ss.solution = sol
+            st.warning("solution computed")
 
     with st.container(border=False, gap="xxsmall"):
         st_select_block()
         st.divider()
-        st_block(fill)
+        st_block()
 
     with st.sidebar:
-        fill(st.empty(), st_totals)()
+        st_totals(sol)
 
         dt = time.perf_counter_ns() - dt
         st.markdown(f":small[Rendered in {round(dt / 1e6)}ms]")
@@ -648,38 +667,11 @@ def st_main():
         st.session_state["refreshed"] = False
         return
 
-    # TODO even with a return here it seems a bit slow, how is that possible?
-    # ahh no didnt save last state ... or wait? first time we do and then it should be there?
-    # see to line profile this function?
-    # return
-
-    # TODO more flat structures again
-    # trust your intuition when it feels smart but too complicated
-    # just make fill(partial(st_meta, todo))
-    # so that you can stick with st_meta(sol, todo), no heavy assumptions
-
-    # TODO would st.rerun work better? we would remove old elements because we ended, and then update again when ready?
-    #      could be nicer, then just the damn backfill was for nothing :)
-    #      well actually, it takes the same as long, so we would need to run the solution in the bg for snappyness
-    # TODO iterative?
-    # blocks, block_indices, building_indices = get_blocks()
-    # allocated, status = solve(blocks)
-    # sol = Solution(blocks, block_indices, building_indices, allocated, status)
-    # st.session_state["last_solution"] = sol
-    # st.session_state["refreshed"] = True
-    # st.rerun()
-
-    # TODO the page still seems to not consider things done
-    # is there a way for a real background task?
-    # run_every detaches it, but the first run still prevents finishing a render
-    st.session_state["first"] = True
+    ss.delay_refresh = True
     st_refresh()
 
     # TODO also @st.cache_data functions can contain st statements, will that make some static content faster?
     # and @st.cache_data(experimental_allow_widgets=True) if you want interactive ones too, see if it gives a speedup?
-
-    # for run in fill.runs:
-    #     run(sol)
 
 
 # TODO problems
