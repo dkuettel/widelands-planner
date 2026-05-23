@@ -379,6 +379,37 @@ def colored(m: str) -> str:
     return f":gray[{m}]"
 
 
+# NOTE so far this doesnt seem expensive, but in the end there is really only one global order that we could take a subset of instead of recomputing everytime
+def get_topological_order(block_uuid: str) -> list[str]:
+    def is_dependency(uuid: str, ouuid: str) -> bool:
+        name = ss.get_building_name(uuid)
+        if name is None:
+            return False
+        oname = ss.get_building_name(ouuid)
+        if oname is None:
+            return False
+        takes = set(ss.get_building_takes(uuid, name))
+        obuilding = building_from_name(oname)
+        omakes = obuilding.get_make_items()
+        return bool(takes & omakes)
+
+    uuids = set(ss.buildings[block_uuid])
+    dependencies = {
+        uuid: {
+            ouuid for ouuid in uuids if not ouuid == uuid and is_dependency(uuid, ouuid)
+        }
+        for uuid in uuids
+    }
+    # NOTE would be nicer to prefer direct stuff closer, like ->tree and tree->log
+    ordered: list[str] = []
+    while uuids:
+        ready = {uuid for uuid in uuids if not (dependencies[uuid] & uuids)}
+        assert ready
+        ordered.extend(sorted(ready, key=ss.get_building_name))
+        uuids = uuids - ready
+    return ordered
+
+
 def st_buildings(block_uuid: str):
     match ss.solution:
         case None:
@@ -387,7 +418,7 @@ def st_buildings(block_uuid: str):
             pass
 
     with st.container(gap="xxsmall"):
-        for building_uuid in ss.buildings[block_uuid]:
+        for building_uuid in get_topological_order(block_uuid):
             st_building(block_uuid, building_uuid, sol)
 
         with st.container(horizontal=True):
