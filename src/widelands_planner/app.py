@@ -201,10 +201,9 @@ def st_ivec(ivec: Ivec):
         ]
     )
 
-    # TODO polars is better, but styling doesnt work with st.table
-    # but we could just use polars to inject html? more control
-    # it just needs some work to fit into the streamlit visual design
-    st.table(  # pyright: ignore[reportUnknownMemberType]
+    # NOTE polars is in general faster, but shouldnt matter much here
+    # and polars doesnt seem to work with styling
+    st.table(
         df.style.format(
             {
                 "i/min": colored("{:.1f}"),
@@ -318,7 +317,6 @@ def maybe_get_state_from_url():
             st.warning("Cannot load state from url. The value of `state` is not `str`.")
             return
 
-    # TODO is this a security problem that we just allow any state to be updated?
     st.session_state.update(state)
 
     st.info("Loaded state from url.")
@@ -432,7 +430,6 @@ def st_buildings(block_uuid: str):
                                 text_alignment="right",
                             )
 
-                # TODO this one is also slow, not much to do? dont sort everytime?
                 name = st.selectbox(
                     "name",
                     sorted(i.value for i in Bname),
@@ -444,7 +441,6 @@ def st_buildings(block_uuid: str):
                 bname = None if name is None else Bname(name)
                 building = None if bname is None else building_from_name(bname)
 
-                # TODO lazy eval for speed? yes we should, every widget counts
                 with st.popover(
                     ":material/settings:",
                     key=f"building[{building_uuid}].settings",
@@ -483,7 +479,6 @@ def st_buildings(block_uuid: str):
                     )
 
         with st.container(horizontal=True):
-            # TODO actually doing the if, and not the callback, requires 2 reruns
             st.button(
                 "add building",
                 key="add building",
@@ -618,13 +613,11 @@ def get_solution() -> Solution:
     )
 
 
-# a hack that could work: https://gist.github.com/Alyxion/7880aaa0c9f6036c23d94461d3a8fa6c
+# NOTE a hack that could work: https://gist.github.com/Alyxion/7880aaa0c9f6036c23d94461d3a8fa6c
 # but streamlit is working on adding background tasks anyway, lets wait
+# and recently async is also possible, if we want to go this way
 @st.fragment(run_every=0.1)
 def st_refresh():
-    # TODO this is a very cheap way to get a background process, it only happens once, but is detached
-    # if on rapid fire reruns (clicking much) we could hold back somehow, that would be best
-    # i think this gets killed maybe? but we could still check at the end if we are still relevant?
     if ss.delay_refresh:
         ss.delay_refresh = False
         return
@@ -707,15 +700,11 @@ def st_main():
     ss.delay_refresh = True
     st_refresh()
 
-    # TODO also @st.cache_data functions can contain st statements, will that make some static content faster?
-    # and @st.cache_data(experimental_allow_widgets=True) if you want interactive ones too, see if it gives a speedup?
-
 
 # TODO problems
 # ordering of buildings, finding them, and not duplicating for those where it doesnt make sense?
 # adding tab, or renaming, resets to viewing the first tab
 # adding a building doesnt fokus on the name selection, but maybe there are buttons for adding the right one in the first place?
-# save all the time, keep a timeline? save version to load old stuff?
 # order buildings, by feed-into-order?
 # when gaming out a new addition, would be nice to see the diff until "confirmed", or todo add click checkboxes
 #    (almost like a new block, and then merge it in when done)
