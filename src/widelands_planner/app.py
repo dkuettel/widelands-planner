@@ -319,7 +319,7 @@ def maybe_get_state_from_url():
 
     st.session_state.update(state)
 
-    st.info("Loaded state from url.")
+    st.toast("Loaded state from url.")
 
 
 def set_url_from_state():
@@ -665,7 +665,7 @@ def st_main():
 
     with st.sidebar:
         if st.toggle("show stats", key="stats", value=True):
-            st_stats = st.container(gap="xxsmall")
+            st_stats = st.container(gap=None)
         else:
             st_stats = None
         st.divider()
@@ -678,25 +678,34 @@ def st_main():
     match ss.solution:
         case Solution() as sol:
             if ss.refreshed:
-                st.info("Cold-start solution computed in the background.")
+                if st_stats:
+                    with st_stats:
+                        st.markdown(
+                            ":small[Cold-start solution computed in the background.]"
+                        )
             else:
-                # TODO add the info for warm/cold and co in sidebar stats, not as st.infos, but keep loaded from url
                 # TODO _blocks and co could be reused for get_solution, its not doing much anymore
                 _blocks, _block_indices, _building_indices, _building_names, resume = (
                     maybe_get_resume()
                 )
                 if resume is None:
-                    st.info("Solution computation delayed.")
+                    if st_stats:
+                        with st_stats:
+                            st.markdown(":small[Solution computation delayed.]")
                 else:
                     sol = get_solution()
                     ss.solution = sol
                     ss.refreshed = True
                     ss.solve_count += 1
-                    st.info("Computed warm-start solution.")
+                    if st_stats:
+                        with st_stats:
+                            st.markdown(":small[Computed warm-start solution.]")
         case _:
             sol = get_solution()
             ss.solution = sol
-            st.warning("Computed cold-start solution.")
+            if st_stats:
+                with st_stats:
+                    st.markdown(":small[Computed cold-start solution.]")
 
     with st.container(border=False, gap="xxsmall"):
         st_select_block()
