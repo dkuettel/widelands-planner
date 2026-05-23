@@ -627,6 +627,26 @@ def st_refresh():
     st.rerun(scope="app")
 
 
+def recompute_cold_start():
+    blocks, block_indices, building_indices, building_names, _resume = (
+        maybe_get_resume()
+    )
+    allocated, status, resume = solve(blocks, None)
+    # TODO set revision?
+    ss.solution = Solution(
+        1,
+        blocks,
+        block_indices,
+        building_indices,
+        building_names,
+        allocated,
+        status,
+        resume,
+    )
+    ss.refreshed = True
+    ss.solve_count += 1
+
+
 def st_main():
     dt = time.perf_counter_ns()
 
@@ -660,7 +680,6 @@ def st_main():
             if ss.refreshed:
                 st.info("Cold-start solution computed in the background.")
             else:
-                # TODO make a button to force cold-start
                 # TODO add the info for warm/cold and co in sidebar stats, not as st.infos, but keep loaded from url
                 # TODO _blocks and co could be reused for get_solution, its not doing much anymore
                 _blocks, _block_indices, _building_indices, _building_names, resume = (
@@ -687,11 +706,18 @@ def st_main():
     with st.sidebar:
         st_totals(sol)
 
-        if st_stats:
-            with st_stats:
-                dt = time.perf_counter_ns() - dt
-                st.markdown(f":small[Rendered in {round(dt / 1e6)}ms]")
-                st.markdown(f":small[{sol.status}]")
+    if st_stats:
+        with st_stats:
+            dt = time.perf_counter_ns() - dt
+            st.markdown(f":small[Rendered in {round(dt / 1e6)}ms]")
+            st.markdown(f":small[{sol.status}]")
+            st.button(
+                ":material/refresh: recompute",
+                key="recompute",
+                help="Usually a warm-start is applied to update the data. Click here to force a cold-start complete recomputation.",
+                on_click=callback(recompute_cold_start),
+                type="tertiary",
+            )
 
     if ss.refreshed:
         ss.refreshed = False
