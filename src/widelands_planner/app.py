@@ -321,7 +321,7 @@ def maybe_get_state_from_url():
     # TODO is this a security problem that we just allow any state to be updated?
     st.session_state.update(state)
 
-    st.info("Loaded session from url.")
+    st.info("Loaded state from url.")
 
 
 def set_url_from_state():
