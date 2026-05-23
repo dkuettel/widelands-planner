@@ -449,12 +449,14 @@ def st_buildings(block_uuid: str):
                 ) as c:
                     if c.open:
                         if bname is not None and building is not None:
-                            items = sorted(i.value for i in building.get_take_items())
+                            take_items = sorted(
+                                i.value for i in building.get_take_items()
+                            )
                             st.pills(
                                 "takes",
-                                items,
+                                take_items,
                                 selection_mode="multi",
-                                default=items,
+                                default=take_items,
                                 key=f"state.building[{building_uuid}].settings.{bname}.takes",
                             )
 
@@ -467,14 +469,15 @@ def st_buildings(block_uuid: str):
                 )
 
                 if bname is not None and building is not None:
-                    items = st.session_state.get(
-                        f"building[{building_uuid}].settings.{bname}.takes", []
-                    )
+                    # TODO should use solution here, we dont always make all of them, or take all of them
+                    take_items = [
+                        i.value for i in ss.get_building_takes(building_uuid, bname)
+                    ]
+                    make_items = [i.value for i in building.get_make_items()]
                     st.code(
-                        " + ".join(items)
+                        " + ".join(take_items or ["∅"])
                         + " -> "
-                        # TODO should do it after the fact, because we dont produce all, depends on what we take
-                        + " + ".join(i.value for i in building.get_make_items()),
+                        + " + ".join(make_items or ["∅"]),
                         language=None,
                     )
 
@@ -664,7 +667,7 @@ def st_main():
     ss.revision = ss.revision + 1  # TODO can we do it only on actual changes?
 
     with st.sidebar:
-        if st.toggle("show stats", key="stats", value=True):
+        if st.toggle("session statistics", key="stats", value=True):
             st_stats = st.container(gap=None)
         else:
             st_stats = None
