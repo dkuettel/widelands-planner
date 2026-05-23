@@ -784,6 +784,6 @@ requires-dist = [
     { name = "numpy", specifier = ">=2.4.3" },
     { name = "pandas-stubs", specifier = ">=3.0.0.260204" },
     { name = "rich", specifier = ">=15.0.0" },
-    { name = "streamlit", specifier = ">=1.55.0" },
+    { name = "streamlit", specifier = ">=1.57.0" },
     { name = "tabulate", specifier = ">=0.10.0" },
 ]

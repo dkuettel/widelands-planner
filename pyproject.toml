@@ -15,7 +15,7 @@ dependencies = [
     # "qpsolvers[clarabel]>=4.11.0",
     "pandas-stubs>=3.0.0.260204",
     "rich>=15.0.0",
-    "streamlit>=1.55.0",
+    "streamlit>=1.57.0",
     "tabulate>=0.10.0",
     # "torch>=2.11.0",
 ]
