@@ -388,98 +388,7 @@ def st_buildings(block_uuid: str):
 
     with st.container(gap="xxsmall"):
         for building_uuid in ss.buildings[block_uuid]:
-            with hcontainer(vertical_alignment="center", border=False):
-                st.number_input(
-                    "count",
-                    key=ss.key_building_count(building_uuid),
-                    min_value=0,
-                    label_visibility="collapsed",
-                    width=150,
-                )
-
-                with st.container(width=140, horizontal=True):
-                    match sol.building_indices.get(building_uuid, None):
-                        case None:
-                            st.markdown(colored(":material/more_horiz:"))
-                        case (int(i), int(j)):
-                            building = sol.blocks[i][j]
-                            alloc = sol.allocated[i][j]
-                            if building.count == 0:
-                                st.markdown(colored(":material/warning:"))
-                            elif (
-                                math.ceil(building.count * alloc.stable_usage)
-                                < building.count
-                            ):
-                                st.markdown(colored(":material/remove:"))
-                            elif alloc.is_infinite:
-                                st.markdown(colored(":material/all_inclusive:"))
-                            elif alloc.stable_usage < 1.0:
-                                st.markdown(colored(":material/check:"))
-                            else:
-                                st.markdown(colored(":material/add:"))
-                            st.markdown(
-                                colored(f"**{round(alloc.stable_usage * 100)}%**"),
-                                width=40,
-                                text_alignment="right",
-                            )
-                            st.markdown(
-                                colored(
-                                    f":small[+{round((alloc.flood_usage - alloc.stable_usage) * 100)}%]"
-                                ),
-                                width=40,
-                                text_alignment="right",
-                            )
-
-                name = st.selectbox(
-                    "name",
-                    sorted(i.value for i in Bname),
-                    index=None,
-                    key=ss.key_building_name(building_uuid),
-                    label_visibility="collapsed",
-                    width=250,
-                )
-                bname = None if name is None else Bname(name)
-                building = None if bname is None else building_from_name(bname)
-
-                with st.popover(
-                    ":material/settings:",
-                    key=f"building[{building_uuid}].settings",
-                    disabled=bname is None,
-                    on_change="rerun",
-                ) as c:
-                    if c.open:
-                        if bname is not None and building is not None:
-                            take_items = sorted(
-                                i.value for i in building.get_take_items()
-                            )
-                            st.pills(
-                                "takes",
-                                take_items,
-                                selection_mode="multi",
-                                default=take_items,
-                                key=f"state.building[{building_uuid}].settings.{bname}.takes",
-                            )
-
-                st.button(
-                    ":material/delete:",
-                    key=f"remove building[{building_uuid}]",
-                    on_click=callback(
-                        partial(delete_building, block_uuid, building_uuid)
-                    ),
-                )
-
-                if bname is not None and building is not None:
-                    # TODO should use solution here, we dont always make all of them, or take all of them
-                    take_items = [
-                        i.value for i in ss.get_building_takes(building_uuid, bname)
-                    ]
-                    make_items = [i.value for i in building.get_make_items()]
-                    st.code(
-                        " + ".join(take_items or ["∅"])
-                        + " -> "
-                        + " + ".join(make_items or ["∅"]),
-                        language=None,
-                    )
+            st_building(block_uuid, building_uuid, sol)
 
         with st.container(horizontal=True):
             st.button(
@@ -509,6 +418,94 @@ def st_buildings(block_uuid: str):
                                 partial(add_building, block_uuid, bname, 1)
                             ),
                         )
+
+
+def st_building(block_uuid: str, building_uuid: str, sol: Solution):
+    with hcontainer(vertical_alignment="center", border=False):
+        st.number_input(
+            "count",
+            key=ss.key_building_count(building_uuid),
+            min_value=0,
+            label_visibility="collapsed",
+            width=150,
+        )
+
+        with st.container(width=140, horizontal=True):
+            match sol.building_indices.get(building_uuid, None):
+                case None:
+                    st.markdown(colored(":material/more_horiz:"))
+                case (int(i), int(j)):
+                    building = sol.blocks[i][j]
+                    alloc = sol.allocated[i][j]
+                    if building.count == 0:
+                        st.markdown(colored(":material/warning:"))
+                    elif (
+                        math.ceil(building.count * alloc.stable_usage) < building.count
+                    ):
+                        st.markdown(colored(":material/remove:"))
+                    elif alloc.is_infinite:
+                        st.markdown(colored(":material/all_inclusive:"))
+                    elif alloc.stable_usage < 1.0:
+                        st.markdown(colored(":material/check:"))
+                    else:
+                        st.markdown(colored(":material/add:"))
+                    st.markdown(
+                        colored(f"**{round(alloc.stable_usage * 100)}%**"),
+                        width=40,
+                        text_alignment="right",
+                    )
+                    st.markdown(
+                        colored(
+                            f":small[+{round((alloc.flood_usage - alloc.stable_usage) * 100)}%]"
+                        ),
+                        width=40,
+                        text_alignment="right",
+                    )
+
+        name = st.selectbox(
+            "name",
+            sorted(i.value for i in Bname),
+            index=None,
+            key=ss.key_building_name(building_uuid),
+            label_visibility="collapsed",
+            width=250,
+        )
+        bname = None if name is None else Bname(name)
+        building = None if bname is None else building_from_name(bname)
+
+        with st.popover(
+            ":material/settings:",
+            key=f"building[{building_uuid}].settings",
+            disabled=bname is None,
+            on_change="rerun",
+        ) as c:
+            if c.open:
+                if bname is not None and building is not None:
+                    take_items = sorted(i.value for i in building.get_take_items())
+                    st.pills(
+                        "takes",
+                        take_items,
+                        selection_mode="multi",
+                        default=take_items,
+                        key=f"state.building[{building_uuid}].settings.{bname}.takes",
+                    )
+
+        st.button(
+            ":material/delete:",
+            key=f"remove building[{building_uuid}]",
+            on_click=callback(partial(delete_building, block_uuid, building_uuid)),
+        )
+
+        if bname is not None and building is not None:
+            # TODO should use solution here, we dont always make all of them, or take all of them
+            take_items = [i.value for i in ss.get_building_takes(building_uuid, bname)]
+            make_items = [i.value for i in building.get_make_items()]
+            st.code(
+                " + ".join(take_items or ["∅"])
+                + " -> "
+                + " + ".join(make_items or ["∅"]),
+                language=None,
+            )
 
 
 def get_blocks() -> tuple[
