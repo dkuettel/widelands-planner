@@ -767,6 +767,17 @@ def st_main():
     st_refresh()
 
 
+# draft for topological sorting or something like that
+# could replace the input output code block with symbols that in total form a matrix
+# dots for consume, and below arrows up for giving to? empty arrows for passing thru, dot-arrow or full arrow for start?
+# and we sort so that we only need arrows up?
+# how to mark what are exceptions?
+# symbols: https://symbl.cc/en/unicode-table/#box-drawing
+#     ┓
+#     ┫
+#     ┃
+#     ┛
+
 # TODO problems
 # ordering of buildings, finding them, and not duplicating for those where it doesnt make sense?
 # adding tab, or renaming, resets to viewing the first tab
@@ -776,6 +787,8 @@ def st_main():
 #    (almost like a new block, and then merge it in when done)
 #    and/or a way for the blocks to be repeated, this is how you play it usually
 # TODO when buildings are there but with 0 count, then the add/remove/inf indicators are off
+# TODO we cant rename blocks right now
+# TODO could I have used the bind option for all the state i want in the url?
 
 if __name__ == "__main__":
     # NOTE this would be better, but streamlit's magic fails to do reloads correctly then
