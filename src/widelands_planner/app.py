@@ -788,7 +788,14 @@ def st_main():
 #    and/or a way for the blocks to be repeated, this is how you play it usually
 # TODO when buildings are there but with 0 count, then the add/remove/inf indicators are off
 # TODO we cant rename blocks right now
+# TODO we cant copy blocks yet
 # TODO could I have used the bind option for all the state i want in the url?
+
+# TODO sometimes its useful to say that we have infinite food or so, early in the campaign you have to follow the script
+# TODO a configurable name (like a savegame) will make bookmarking easier, or configurable to add the datetime, so you can just always bookmark into a folder
+# TODO could think about buildings that are attached to each other, like forester and woodcutter? otherwise you have to waste the block level for that
+# TODO clay is also a bit infinite, its both consumed and used, is there a way to indicate that?
+# TODO could also indicate the usage percentage local vs remote? how to know if we need more for local reasons only but we do have enough generally?
 
 if __name__ == "__main__":
     # NOTE this would be better, but streamlit's magic fails to do reloads correctly then
