@@ -1918,8 +1918,6 @@ def np_flood_forward(state: SolverState) -> SolverState:
     for i, b in enumerate(state.buildings):
         production[*index[i], 1, :, :] = b.np_flooded(aconsumption[*index[i], :])
 
-    print(f"{count} flooding iterations")
-
     return SolverState(state.buildings, index, production, consumption)
 
 
@@ -2080,8 +2078,6 @@ def np_back_pressure(state: SolverState) -> tuple[SolverState, set[Item]]:
             consumption[*index[i], 0, :] = new_local
 
         count += 1
-
-    print(f" {count} pressure iterations")
 
     return SolverState(
         state.buildings, state.index, production, consumption
