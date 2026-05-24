@@ -694,49 +694,27 @@ def st_main():
     ss.render_count += 1
     ss.revision = ss.revision + 1  # TODO can we do it only on actual changes?
 
-    with st.sidebar:
-        if st.toggle("session statistics", key="stats", value=True):
-            st_stats = st.container(gap=None)
-        else:
-            st_stats = None
-        st.divider()
-        if st_stats:
-            with st_stats:
-                st.markdown(f":small[Rendered {ss.render_count} times.]")
-                st.markdown(f":small[Solved {ss.solve_count} times.]")
-                st.markdown(f":small[On revision {ss.revision}.]")
-
     match ss.solution:
         case Solution() as sol:
             if ss.refreshed:
-                if st_stats:
-                    with st_stats:
-                        st.markdown(
-                            ":small[Cold-start solution computed in the background.]"
-                        )
+                compute_status = "Cold-start solution computed in the background."
             else:
                 # TODO _blocks and co could be reused for get_solution, its not doing much anymore
                 _blocks, _block_indices, _building_indices, _building_names, resume = (
                     maybe_get_resume()
                 )
                 if resume is None:
-                    if st_stats:
-                        with st_stats:
-                            st.markdown(":small[Solution computation delayed.]")
+                    compute_status = "Solution computation delayed."
                 else:
                     sol = get_solution()
                     ss.solution = sol
                     ss.refreshed = True
                     ss.solve_count += 1
-                    if st_stats:
-                        with st_stats:
-                            st.markdown(":small[Computed warm-start solution.]")
+                    compute_status = "Computed warm-start solution"
         case _:
             sol = get_solution()
             ss.solution = sol
-            if st_stats:
-                with st_stats:
-                    st.markdown(":small[Computed cold-start solution.]")
+            compute_status = "Computed cold-start solution."
 
     with st.container(border=False, gap="xxsmall"):
         st_select_block()
@@ -745,19 +723,23 @@ def st_main():
 
     with st.sidebar:
         st_totals(sol)
-
-    if st_stats:
-        with st_stats:
-            dt = time.perf_counter_ns() - dt
-            st.markdown(f":small[Rendered in {round(dt / 1e6)}ms]")
-            st.markdown(f":small[{sol.status}]")
-            st.button(
-                ":material/refresh: recompute",
-                key="recompute",
-                help="Usually a warm-start is applied to update the data. Click here to force a cold-start complete recomputation.",
-                on_click=callback(recompute_cold_start),
-                type="tertiary",
-            )
+        st.divider()
+        if st.toggle("session statistics", key="stats", value=True):
+            with st.container(gap=None):
+                st.markdown(f":small[Rendered {ss.render_count} times.]")
+                st.markdown(f":small[Solved {ss.solve_count} times.]")
+                st.markdown(f":small[On revision {ss.revision}.]")
+                dt = time.perf_counter_ns() - dt
+                st.markdown(f":small[Rendered in {round(dt / 1e6)}ms]")
+                st.markdown(f":small[{sol.status}]")
+                st.markdown(f":small[{compute_status}]")
+                st.button(
+                    ":material/refresh: recompute",
+                    key="recompute",
+                    help="Usually a warm-start is applied to update the data. Click here to force a cold-start complete recomputation.",
+                    on_click=callback(recompute_cold_start),
+                    type="tertiary",
+                )
 
     if ss.refreshed:
         ss.refreshed = False
