@@ -405,9 +405,9 @@ def get_topological_order(block_uuid: str) -> list[str]:
     while uuids:
         ready = {uuid for uuid in uuids if not (dependencies[uuid] & uuids)}
         assert ready
-        ordered.extend(sorted(ready, key=ss.get_building_name))
+        ordered.extend(sorted(ready, key=lambda uuid: ss.get_building_name(uuid) or ""))
         uuids = uuids - ready
-    return ordered
+    return list(reversed(ordered))
 
 
 def st_buildings(block_uuid: str):
