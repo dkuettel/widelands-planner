@@ -714,6 +714,8 @@ def st_main():
         case _:
             sol = get_solution()
             ss.solution = sol
+            ss.solve_count += 1
+            ss.refreshed = True
             compute_status = "Computed cold-start solution."
 
     with st.container(border=False, gap="xxsmall"):
