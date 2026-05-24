@@ -7,6 +7,7 @@ so we define custom types here instead
 from __future__ import annotations
 
 from dataclasses import dataclass
+from enum import StrEnum
 
 from widelands_planner.state import (
     Allocated,
@@ -40,3 +41,8 @@ class Solution:
             status=SolutionStatus(True, 0, 0),
             resume=None,
         )
+
+
+class Details(StrEnum):
+    items = "items"
+    local_ratio = "local ratio"

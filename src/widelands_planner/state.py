@@ -308,6 +308,9 @@ class Vec[I]:
         # TODO ignoring missing entries
         return Vec(self.ty, {i: (round(v / eps) * eps) for (i, v) in self.data.items()})
 
+    def sum(self) -> float:
+        return sum(self.data.values())
+
 
 type Ivec = Vec[Item]
 

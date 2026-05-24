@@ -14,7 +14,7 @@ from uuid import uuid4
 import pandas as pd
 import streamlit as st
 
-from widelands_planner.app_data import Solution
+from widelands_planner.app_data import Details, Solution
 from widelands_planner.state import (
     Bname,
     BuildingCount,
@@ -186,6 +186,13 @@ class SessionState:
     def solve_count(self, c: int):
         st.session_state["solve_count"] = c
 
+    @property
+    def details(self) -> Details:
+        v = st.session_state.get("details", None)
+        if v in Details:
+            return Details(v)
+        return Details.local_ratio
+
 
 ss: Final = SessionState()
 
@@ -252,6 +259,14 @@ def st_select_block():
             key="remove block",
             disabled=block_name is None,
             on_click=callback(remove_block),
+        )
+
+        st.pills(
+            "show details",
+            Details,
+            default=Details.local_ratio,
+            required=True,
+            key="details",
         )
 
     if block_name is None:
@@ -527,16 +542,43 @@ def st_building(block_uuid: str, building_uuid: str, sol: Solution):
             on_click=callback(partial(delete_building, block_uuid, building_uuid)),
         )
 
-        if bname is not None and building is not None:
-            # TODO should use solution here, we dont always make all of them, or take all of them
-            take_items = [i.value for i in ss.get_building_takes(building_uuid, bname)]
-            make_items = [i.value for i in building.get_make_items()]
-            st.code(
-                " + ".join(take_items or ["∅"])
-                + " -> "
-                + " + ".join(make_items or ["∅"]),
-                language=None,
-            )
+        match ss.details:
+            case Details.local_ratio:
+                if building_uuid in sol.building_indices:
+                    i, j = sol.building_indices[building_uuid]
+                    alloc = sol.allocated[i][j]
+                    take_local = alloc.take_local.sum()
+                    take_remote = alloc.take_remote.sum()
+                    if take_local + take_remote > 0:
+                        take = f"{round(take_local / (take_local + take_remote) * 100)}% local"
+                    else:
+                        take = "∅"
+                    make_local = (
+                        alloc.make_main_local.sum() + alloc.make_aux_local.sum()
+                    )
+                    make_remote = (
+                        alloc.make_main_remote.sum() + alloc.make_aux_remote.sum()
+                    )
+                    if make_local + make_remote > 0:
+                        make = f"{round(make_local / (make_local + make_remote) * 100)}% local"
+                    else:
+                        make = "∅"
+                    st.code(f"{take:>10} -> {make:>10}")
+                else:
+                    st.code("...")
+            case Details.items:
+                if bname is not None and building is not None:
+                    # TODO should use solution here, we dont always make all of them, or take all of them
+                    take_items = [
+                        i.value for i in ss.get_building_takes(building_uuid, bname)
+                    ]
+                    make_items = [i.value for i in building.get_make_items()]
+                    st.code(
+                        " + ".join(take_items or ["∅"])
+                        + " -> "
+                        + " + ".join(make_items or ["∅"]),
+                        language=None,
+                    )
 
 
 def get_blocks() -> tuple[
@@ -779,7 +821,6 @@ def st_main():
 # TODO a configurable name (like a savegame) will make bookmarking easier, or configurable to add the datetime, so you can just always bookmark into a folder
 # TODO could think about buildings that are attached to each other, like forester and woodcutter? otherwise you have to waste the block level for that
 # TODO clay is also a bit infinite, its both consumed and used, is there a way to indicate that?
-# TODO could also indicate the usage percentage local vs remote? how to know if we need more for local reasons only but we do have enough generally?
 
 if __name__ == "__main__":
     # NOTE this would be better, but streamlit's magic fails to do reloads correctly then
