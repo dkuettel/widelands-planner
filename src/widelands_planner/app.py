@@ -7,6 +7,7 @@ import time
 import zlib
 from base64 import b64decode, b64encode
 from collections.abc import Callable
+from datetime import datetime
 from functools import partial
 from typing import Final
 from uuid import uuid4
@@ -186,12 +187,44 @@ class SessionState:
     def solve_count(self, c: int):
         st.session_state["solve_count"] = c
 
+    key_details: Final = "details"
+
     @property
     def details(self) -> Details:
-        v = st.session_state.get("details", None)
+        v = st.session_state.get(self.key_details, None)
         if v in Details:
             return Details(v)
         return Details.local_ratio
+
+    key_name: Final = "state.name"
+
+    @property
+    def name(self) -> str:
+        v = st.session_state.get(self.key_name, None)
+        match v:
+            case str():
+                return v
+            case _:
+                return "unnamed"
+
+    @name.setter
+    def name(self, v: str):
+        st.session_state[self.key_name] = v
+
+    key_use_date: Final = "state.use_date"
+
+    @property
+    def use_date(self) -> bool:
+        v = st.session_state.get(self.key_use_date, None)
+        match v:
+            case bool():
+                return v
+            case _:
+                return True
+
+    @use_date.setter
+    def use_date(self, v: bool):
+        st.session_state[self.key_use_date] = v
 
 
 ss: Final = SessionState()
@@ -266,7 +299,7 @@ def st_select_block():
             Details,
             default=Details.local_ratio,
             required=True,
-            key="details",
+            key=ss.key_details,
         )
 
     if block_name is None:
@@ -309,6 +342,8 @@ def ensure_state():
     ss.solution = ss.solution
     ss.refreshed = ss.refreshed
     ss.solve_count = ss.solve_count
+    ss.name = ss.name
+    ss.use_date = ss.use_date
 
 
 def maybe_get_state_from_url():
@@ -720,12 +755,20 @@ def recompute_cold_start():
     ss.solve_count += 1
 
 
+def get_name() -> str:
+    name = ss.name
+    if ss.use_date:
+        now = datetime.now().isoformat(sep=" ", timespec="minutes")
+        name = f"{name} @{now}"
+    return name
+
+
 def st_main():
     dt = time.perf_counter_ns()
 
     st.set_page_config(
         page_icon=":material/table:",
-        page_title="widelands planner",
+        page_title=f"widelands: {get_name()}",
         layout="wide",
     )
 
@@ -766,6 +809,10 @@ def st_main():
         st_block()
 
     with st.sidebar:
+        st.write(get_name())
+        st.text_input("name", key=ss.key_name)
+        st.toggle("use date", key=ss.key_use_date)
+        st.divider()
         st_totals(sol)
         st.divider()
         if st.toggle("session statistics", key="stats", value=True):
@@ -818,7 +865,6 @@ def st_main():
 # TODO could I have used the bind option for all the state i want in the url?
 
 # TODO sometimes its useful to say that we have infinite food or so, early in the campaign you have to follow the script
-# TODO a configurable name (like a savegame) will make bookmarking easier, or configurable to add the datetime, so you can just always bookmark into a folder
 # TODO could think about buildings that are attached to each other, like forester and woodcutter? otherwise you have to waste the block level for that
 # TODO clay is also a bit infinite, its both consumed and used, is there a way to indicate that?
 
