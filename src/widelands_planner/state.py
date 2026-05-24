@@ -341,7 +341,7 @@ def summarize_ivec(ivec: Ivec) -> dict[str, float]:
     for i, v in ivec.data.items():
         if v == 0.0:
             continue
-        name = meta_items.get(i, i.name)
+        name = meta_items.get(i, i.value)
         sum[name] = sum.get(name, 0.0) + v
     return sum
 
