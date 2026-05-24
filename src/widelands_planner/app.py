@@ -867,6 +867,14 @@ def st_main():
 # TODO sometimes its useful to say that we have infinite food or so, early in the campaign you have to follow the script
 # TODO could think about buildings that are attached to each other, like forester and woodcutter? otherwise you have to waste the block level for that
 # TODO clay is also a bit infinite, its both consumed and used, is there a way to indicate that?
+# TODO sometimes is see 100% but no indicator for +, and its actually not the same between recompute and iterative update :/
+# TODO sometimes still hard to understand what is coming in, and if there is a bottleneck there, or if all incoming are backed up
+# TODO i guess we just want to know every next bottleneck every time to creep forward
+# TODO a global indicator for "problems"?
+# TODO remember usage is local first, so things might look like 100%, but doesnt mean actually limited
+# TODO if we just want to see every next bottleneck, then blocks are more like areas, and less topical, they could become overlapping in some sense?
+# TODO a new block with no buildings has the import/export missing
+# TODO need deep mines
 
 if __name__ == "__main__":
     # NOTE this would be better, but streamlit's magic fails to do reloads correctly then
