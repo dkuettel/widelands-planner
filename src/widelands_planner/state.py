@@ -1692,156 +1692,6 @@ def building_count_from_ips(item: Item, ips: float) -> list[tuple[Bname, float]]
     return counts
 
 
-def iterative(blocks: list[Block]) -> tuple[Ivec, Ivec]:
-    # TODO init with last solution?
-    take: Ivec | None = None
-    last_take: Ivec | None = None
-    make: Ivec | None = None
-    last_make: Ivec | None = None
-
-    for _ in range(100):
-        if not (
-            take is None
-            or make is None
-            or last_take is None
-            or last_make is None
-            # TODO 0.1 / 60 ... i want in ipm to be to one digit
-            # but that maybe doesnt always make sense?
-            or not last_take.almost_equal(take, 0.1 / 60)
-            or not last_make.almost_equal(make, 0.1 / 60)
-            # TODO there also has to be more logic to stop when no changes left
-            # if we try to consume more trees than there are, we go to max iter
-        ):
-            break
-        last_take, last_make = take, make
-        take, make = izeros(), izeros()
-        for block in blocks:
-            for count in block.buildings:
-                take = take.add(count.takes_ips(last_take, last_make))
-                make = make.add(count.makes_ips(last_take, last_make))
-    else:
-        print("too many iterations")
-
-    # TODO or close enough
-    assert take.lte(make)  # pyright: ignore[reportArgumentType, reportOptionalMemberAccess]
-
-    # TODO really need a dataclass for this, so easy to flip
-    return take, make  # pyright: ignore[reportReturnType]
-
-
-@dataclass(frozen=True)
-class Variable:
-    desc: str
-    lb: None | float
-    ub: None | float
-
-    @override
-    def __eq__(self, other: object) -> bool:
-        return id(self) == id(other)
-
-
-@dataclass
-class Equality:
-    """weighted vars == const"""
-
-    vars: dict[Variable, float]
-    # TODO are data classes better, or just plain dicts? None could be the key for the constant?
-    const: float
-
-    def variables(self) -> set[Variable]:
-        return set(self.vars)
-
-
-@dataclass
-class Inequality:
-    """weighted vars <= const"""
-
-    vars: dict[Variable, float]
-    const: float
-
-
-# def build_qp(
-#     min: dict[Variable, float], equations: Sequence[Equality]
-# ) -> tuple[list[Variable], Problem]:
-#     vars = set(min) | {var for equation in equations for var in equation.variables()}
-#     vars = list(vars)
-#     N = len(vars)
-#     K = len(equations)
-#
-#     lb = np.array(
-#         [-math.inf if var.lb is None else var.lb for var in vars], dtype=np.float32
-#     )
-#     ub = np.array(
-#         [-math.inf if var.ub is None else var.ub for var in vars], dtype=np.float32
-#     )
-#
-#     P = np.zeros([N, N], dtype=np.float32)
-#     for var, w in min.items():
-#         i = vars.index(var)
-#         P[i, i] = w
-#
-#     A = np.zeros([K, N], dtype=np.float32)
-#     b = np.zeros([K], dtype=np.float32)
-#     for i, eq in enumerate(equations):
-#         for var, weight in eq.vars.items():
-#             A[i, vars.index(var)] = weight
-#         b[i] = eq.const
-#
-#     problem = Problem(
-#         P=P,
-#         q=np.zeros([N], dtype=np.float32),
-#         A=A,
-#         b=b,
-#         lb=lb,
-#         ub=ub,
-#     )
-#
-#     return vars, problem
-
-
-# def qp(blocks: list[Block]) -> tuple[list[str], Solution] | None:
-#     counts = [count for block in blocks for count in block.buildings]
-#     if len(counts) == 0:
-#         return None
-#
-#     balances: dict[Item, Equality] = {i: Equality(dict(), 0.0) for i in Item}
-#     idles: list[Variable] = []
-#     equations: list[Equality] = []
-#     mins: dict[Variable, float] = dict()
-#
-#     for count in counts:
-#         take, make, eqs, idle, ms = count.get_constraints()
-#         for item, weights in take.items():
-#             for var, weight in weights.items():
-#                 # TODO there should never be the variable existing already
-#                 balances[item].vars[var] = balances[item].vars.get(var, 0.0) - weight
-#         for item, weights in make.items():
-#             for var, weight in weights.items():
-#                 balances[item].vars[var] = balances[item].vars.get(var, 0.0) + weight
-#         equations.extend(eqs)
-#         idles.append(idle)
-#         mins.update(ms)
-#
-#     def has_consumption(equation: Equality) -> bool:
-#         return any(v < 0.0 for v in equation.vars.values())
-#
-#     balances = {
-#         item: equation
-#         for (item, equation) in balances.items()
-#         # TODO its nice and clean, but we might not want that after all?
-#         # adding a building could bring everything to zero, maybe have options
-#         # anyway options for exploring the solution space and seeing how much is needed?
-#         if has_consumption(equation)
-#     }
-#
-#     vars, problem = build_qp(mins, list(balances.values()) + equations)
-#     # TODO clarabel likes scipy.sparse.csc_matrix for speed, and no warnings
-#     # TODO also, if it fails with numerical error, how do we see that?
-#     solution = solve_problem(problem, solver="clarabel")
-#
-#     return [var.desc for var in vars], solution
-
-
 def consumption_from_allocated(allocated: list[Allocated]) -> Ivec:
     return isum(alloc.take_total() for alloc in allocated)
 
@@ -2219,8 +2069,6 @@ def solver_state_from_blocks(
 def solver_update_state(
     state: SolverState,
 ) -> tuple[SolverState, SolverState, set[Item]]:
-    # TODO actually we should look at warmstarting, most of the time you just change one count or building!
-
     flooded_state = np_flood_forward(state)
     state = np_prefer_local(flooded_state)
     state, leaf_items = np_back_pressure(state)
@@ -2265,6 +2113,7 @@ def solve(
     leaf_items: set[Item] = set()
 
     count = 0
+    # TODO currently we never give up, instead do and set converged to False
     while not has_state_converged(prev_state, state):
         prev_state = state
         state, flooded_state, leaf_items = solver_update_state(state)
@@ -2306,21 +2155,3 @@ def solve(
         SolutionStatus(converged=True, iterations=count, milliseconds=round(ms)),
         resume,
     )
-
-
-def solver_has_converged(
-    prev: None | list[Allocated], allocated: list[Allocated]
-) -> bool:
-    return have_allocations_converged(prev, allocated)
-
-
-# def pyinstrument_fixpoint(blocks: list[Block]) -> tuple[str, list[list[Allocated]]]:
-#     from pyinstrument import Profiler
-#
-#     with Profiler() as p:
-#         result = fixpoint(blocks)
-#
-#     time.sleep(5)
-#     p.open_in_browser()
-#
-#     return result
