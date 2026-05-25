@@ -912,6 +912,7 @@ name = "widelands-planner"
 version = "0.1.0"
 source = { editable = "." }
 dependencies = [
+    { name = "clarabel" },
     { name = "line-profiler" },
     { name = "numpy" },
     { name = "pandas-stubs" },
@@ -924,6 +925,7 @@ dependencies = [
 
 [package.metadata]
 requires-dist = [
+    { name = "clarabel", specifier = ">=0.11.1" },
     { name = "line-profiler", specifier = ">=5.0.2" },
     { name = "numpy", specifier = ">=2.4.3" },
     { name = "pandas-stubs", specifier = ">=3.0.0.260204" },
