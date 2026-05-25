@@ -388,22 +388,26 @@ def st_meta(block_uuid: str):
     sol = ss.solution
     if sol is None:
         sol = Solution.from_empty()
+
     match sol.block_indices.get(block_uuid, None):
         case None:
-            return
+            allocated = []
         case int(i):
-            pass
+            allocated = sol.allocated[i]
+
     with st.expander("imports", expanded=True):
         st_ivec(
-            isum(alloc.take_remote for alloc in sol.allocated[i]),
+            isum(alloc.take_remote for alloc in allocated),
         )
+
     with st.expander("local", expanded=True):
         st_ivec(
-            isum(alloc.make_local() for alloc in sol.allocated[i]),
+            isum(alloc.make_local() for alloc in allocated),
         )
+
     with st.expander("exports", expanded=True):
         st_ivec(
-            isum(alloc.make_remote() for alloc in sol.allocated[i]),
+            isum(alloc.make_remote() for alloc in allocated),
         )
 
 
@@ -865,15 +869,14 @@ def st_main():
 # TODO could I have used the bind option for all the state i want in the url?
 
 # TODO sometimes its useful to say that we have infinite food or so, early in the campaign you have to follow the script
-# TODO could think about buildings that are attached to each other, like forester and woodcutter? otherwise you have to waste the block level for that
+# TODO could think about buildings that are attached to each other, like forester and woodcutter? otherwise you have to waste the block level for that, call it a farm
 # TODO clay is also a bit infinite, its both consumed and used, is there a way to indicate that?
-# TODO sometimes is see 100% but no indicator for +, and its actually not the same between recompute and iterative update :/
+# TODO sometimes I see 100% but no indicator for +, and its actually not the same between recompute and iterative update :/, do some rounding?
 # TODO sometimes still hard to understand what is coming in, and if there is a bottleneck there, or if all incoming are backed up
 # TODO i guess we just want to know every next bottleneck every time to creep forward
 # TODO a global indicator for "problems"?
 # TODO remember usage is local first, so things might look like 100%, but doesnt mean actually limited
 # TODO if we just want to see every next bottleneck, then blocks are more like areas, and less topical, they could become overlapping in some sense?
-# TODO a new block with no buildings has the import/export missing
 # TODO need deep mines
 
 if __name__ == "__main__":
