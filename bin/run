@@ -1,4 +1,5 @@
 #!/usr/bin/env zsh
 set -eu -o pipefail
 
-uv run app
+# uv run app
+uv run qp
