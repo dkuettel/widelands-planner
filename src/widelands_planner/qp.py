@@ -115,9 +115,12 @@ def get_lts(
 
 
 def solve(
-    eqs: Sequence[Eq], lts: Sequence[Lt], P_vars: Set[Var], q_vars: Mapping[Var, float]
+    eqs: Sequence[Eq],
+    lts: Sequence[Lt],
+    P_vars: Mapping[Var, float],
+    q_vars: Mapping[Var, float],
 ) -> dict[Var, float]:
-    vars = get_vars(eqs, lts) | P_vars | set(q_vars)
+    vars = get_vars(eqs, lts) | set(P_vars) | set(q_vars)
     ordered_vars = sorted(vars, key=lambda v: (v.name, v.uuid))
     index = {v: i for (i, v) in enumerate(ordered_vars)}
     # var_from_index = {i: v for (i, v) in enumerate(ordered_vars)}
@@ -134,9 +137,9 @@ def solve(
     cones = [c for _, _, cc in constraints for c in cc]
 
     P = np.zeros((n, n))
-    for v in P_vars:
+    for v, f in P_vars.items():
         i = index[v]
-        P[i, i] = 1
+        P[i, i] = f
 
     q = np.zeros(n)
     for v, f in q_vars.items():
@@ -153,6 +156,7 @@ def solve(
 
     solver = clarabel.DefaultSolver(P, q, A, b, cones, settings)  # pyright: ignore[reportUnknownMemberType, reportUnknownVariableType, reportAttributeAccessIssue]
     sol = solver.solve()  # pyright: ignore[reportUnknownMemberType, reportUnknownVariableType]
+    assert sol.status == clarabel.SolverStatus.Solved  # pyright: ignore[reportUnknownMemberType, reportAttributeAccessIssue]
 
     # TODO more info about the solution?
     return {v: sol.x[i] for (v, i) in index.items()}  # pyright: ignore[reportUnknownMemberType]
@@ -175,18 +179,54 @@ def eco():
     b = Var("crafting b", 0, 1)
     c = Var("crafting c", 0, 1)
 
-    eqs.append(Eq({fish: 1, a: -1 / 3, b: -1 / 2}, 0))
-    eqs.append(Eq({meat: 1, a: -1 / 3, c: -1 / 2}, 0))
-    eqs.append(Eq({log: 1, a: -2 / 3, b: -1 / 2, c: -1 / 2}, 0))
+    A = Var("crafting A", 0, 1)
+    B = Var("crafting B", 0, 1)
+    C = Var("crafting C", 0, 1)
+
+    eqs.append(Eq({fish: 1, a: -1 / 3, b: -1 / 2, A: -1 / 3 * 2, B: -1 / 2 * 2}, 0))
+    eqs.append(Eq({meat: 1, a: -1 / 3, c: -1 / 2, A: -1 / 3 * 2, C: -1 / 2 * 2}, 0))
+    eqs.append(
+        Eq(
+            {
+                log: 1,
+                a: -2 / 3,
+                b: -1 / 2,
+                c: -1 / 2,
+                A: -2 / 3 * 2,
+                B: -1 / 2 * 2,
+                C: -1 / 2 * 2,
+            },
+            0,
+        )
+    )
 
     # TODO waste is idle, and we min squares to distribute
     # but we use linear to prefer some crafting over others, does that always work?
-    waste = Var("waste", 0, 1)
+    waste1 = Var("waste1", 0, 1)
     # eqs.append(Eq({fish: 1, meat: 1, log: 1, waste: 1}, 1 / 2 + 1 / 2 + 2 / 3))
-    eqs.append(Eq({a: 1, b: 1, c: 1, waste: 1}, 1))
+    eqs.append(Eq({a: 1, b: 1, c: 1, waste1: 1}, 1))
+
+    waste2 = Var("waste2", 0, 1)
+    eqs.append(Eq({A: 1, B: 1, C: 1, waste2: 1}, 1))
 
     lts.append(Lt({a: 1, b: 1, c: 1}, 1))
+    lts.append(Lt({A: 1, B: 1, C: 1}, 1))
 
-    sol = solve(eqs, lts, {waste}, {a: -2, b: -1, c: -1})
+    f = 2
+    sol = solve(
+        eqs,
+        lts,
+        # TODO why dont I get equal waste? ah because the sum can still be worse
+        # its cheaper to make waste1 small, because waste2 is expensive to fulfill
+        # so we need to measure it in the same unit if we want balance
+        # but I guess the other question is: is that what the game is approximating?
+        # and then, why does the linear part throw it off? same? one is too cheap to use? yes :)
+        # what does it mean to measure in the same unit? here its easy, exact same inputs
+        # but what if only overlapping? feels like you might first solve another matrix to find those weights?
+        # assuming there are two that use the same set, but with different factors, then there isnt a nice balanced solution anyway?
+        {waste1: 1, waste2: 1 * f},
+        # dict(),
+        {a: -2, b: -1, c: -1, A: -2 * f, B: -1 * f, C: -1 * f},
+    )
     sol = rounded(sol)
     rich.print(sol)
