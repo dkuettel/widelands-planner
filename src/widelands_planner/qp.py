@@ -114,8 +114,10 @@ def get_lts(
     return A, b, cones  # pyright: ignore[reportUnknownVariableType]
 
 
-def solve(eqs: Sequence[Eq], lts: Sequence[Lt], q_min: Set[Var]) -> dict[Var, float]:
-    vars = get_vars(eqs, lts)
+def solve(
+    eqs: Sequence[Eq], lts: Sequence[Lt], P_vars: Set[Var], q_vars: Mapping[Var, float]
+) -> dict[Var, float]:
+    vars = get_vars(eqs, lts) | P_vars | set(q_vars)
     ordered_vars = sorted(vars, key=lambda v: (v.name, v.uuid))
     index = {v: i for (i, v) in enumerate(ordered_vars)}
     # var_from_index = {i: v for (i, v) in enumerate(ordered_vars)}
@@ -132,11 +134,13 @@ def solve(eqs: Sequence[Eq], lts: Sequence[Lt], q_min: Set[Var]) -> dict[Var, fl
     cones = [c for _, _, cc in constraints for c in cc]
 
     P = np.zeros((n, n))
-    for v in q_min:
+    for v in P_vars:
         i = index[v]
         P[i, i] = 1
 
     q = np.zeros(n)
+    for v, f in q_vars.items():
+        q[index[v]] = f
 
     A = sparse.csc_matrix(A)  # pyright: ignore[reportConstantRedefinition]
     P = sparse.csc_matrix(P)  # pyright: ignore[reportConstantRedefinition]
@@ -175,12 +179,14 @@ def eco():
     eqs.append(Eq({meat: 1, a: -1 / 3, c: -1 / 2}, 0))
     eqs.append(Eq({log: 1, a: -2 / 3, b: -1 / 2, c: -1 / 2}, 0))
 
-    # TODO still not totally sure this waste min is what we want
-    waste = Var("waste")
-    eqs.append(Eq({fish: 1, meat: 1, log: 1, waste: 1}, 1 / 2 + 1 / 2 + 2 / 3))
+    # TODO waste is idle, and we min squares to distribute
+    # but we use linear to prefer some crafting over others, does that always work?
+    waste = Var("waste", 0, 1)
+    # eqs.append(Eq({fish: 1, meat: 1, log: 1, waste: 1}, 1 / 2 + 1 / 2 + 2 / 3))
+    eqs.append(Eq({a: 1, b: 1, c: 1, waste: 1}, 1))
 
     lts.append(Lt({a: 1, b: 1, c: 1}, 1))
 
-    sol = solve(eqs, lts, {waste})
+    sol = solve(eqs, lts, {waste}, {a: -2, b: -1, c: -1})
     sol = rounded(sol)
     rich.print(sol)
