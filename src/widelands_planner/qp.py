@@ -154,6 +154,10 @@ def solve(eqs: Sequence[Eq], lts: Sequence[Lt], q_min: Set[Var]) -> dict[Var, fl
     return {v: sol.x[i] for (v, i) in index.items()}  # pyright: ignore[reportUnknownMemberType]
 
 
+def rounded(v: Mapping[Var, float]) -> dict[Var, float]:
+    return {v: round(f, 2) for (v, f) in v.items()}
+
+
 @app.command()
 def eco():
     eqs: list[Eq] = []
@@ -178,4 +182,5 @@ def eco():
     lts.append(Lt({a: 1, b: 1, c: 1}, 1))
 
     sol = solve(eqs, lts, {waste})
+    sol = rounded(sol)
     rich.print(sol)
