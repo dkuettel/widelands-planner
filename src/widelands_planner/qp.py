@@ -202,17 +202,31 @@ def eco():
 
     # TODO waste is idle, and we min squares to distribute
     # but we use linear to prefer some crafting over others, does that always work?
-    waste1 = Var("waste1", 0, 1)
+    # waste1 = Var("waste1", 0, 1)
     # eqs.append(Eq({fish: 1, meat: 1, log: 1, waste: 1}, 1 / 2 + 1 / 2 + 2 / 3))
-    eqs.append(Eq({a: 1, b: 1, c: 1, waste1: 1}, 1))
+    # eqs.append(Eq({a: 1, b: 1, c: 1, waste1: 1}, 1))
+    bal1_fish = Var("bal1_fish")
+    eqs.append(Eq({fish: 1 / 3, a: -1 / 3, b: -1 / 2, bal1_fish: -1}, 0))
+    bal1_meat = Var("bal1_meat")
+    eqs.append(Eq({meat: 1 / 3, a: -1 / 3, c: -1 / 2, bal1_meat: -1}, 0))
+    bal1_log = Var("bal1_log")
+    eqs.append(Eq({log: 1 / 3, a: -2 / 3, b: -1 / 2, c: -1 / 2, bal1_log: -1}, 0))
 
-    waste2 = Var("waste2", 0, 1)
-    eqs.append(Eq({A: 1, B: 1, C: 1, waste2: 1}, 1))
+    # waste2 = Var("waste2", 0, 1)
+    # eqs.append(Eq({A: 1, B: 1, C: 1, waste2: 1}, 1))
+    bal2_fish = Var("bal2_fish")
+    eqs.append(Eq({fish: 1 / 3, a: -1 / 3 * 2, b: -1 / 2 * 2, bal2_fish: -1}, 0))
+    bal2_meat = Var("bal2_meat")
+    eqs.append(Eq({meat: 1 / 3, a: -1 / 3 * 2, c: -1 / 2 * 2, bal2_meat: -1}, 0))
+    bal2_log = Var("bal2_log")
+    eqs.append(
+        Eq({log: 1 / 3, a: -2 / 3 * 2, b: -1 / 2 * 2, c: -1 / 2 * 2, bal2_log: -1}, 0)
+    )
 
     lts.append(Lt({a: 1, b: 1, c: 1}, 1))
     lts.append(Lt({A: 1, B: 1, C: 1}, 1))
 
-    f = 2
+    f = 1
     sol = solve(
         eqs,
         lts,
@@ -224,8 +238,22 @@ def eco():
         # what does it mean to measure in the same unit? here its easy, exact same inputs
         # but what if only overlapping? feels like you might first solve another matrix to find those weights?
         # assuming there are two that use the same set, but with different factors, then there isnt a nice balanced solution anyway?
-        {waste1: 1, waste2: 1 * f},
+        # is there a way to measure in item space, and per item?
+        # we could measure it against the production/count distribution? and since it is a square it doesnt matter if below or above
+        # {waste1: 1, waste2: 1 * f},
+        {
+            bal1_fish: 1,
+            bal1_meat: 1,
+            bal1_log: 1,
+            bal2_fish: 1,
+            bal2_meat: 1,
+            bal2_log: 1,
+        },
         # dict(),
+        # TODO this is still difficult, but do we ever have that? two exact same but one is strictly better?
+        # and what really would the game do then? the better one would probably get more as it consumes faster?
+        # cant we make that part of the item balance somehow? it wouldnt get all, but somehow rate-adjusted
+        # we compute the distance to a weighted balance instead?
         {a: -2, b: -1, c: -1, A: -2 * f, B: -1 * f, C: -1 * f},
     )
     sol = rounded(sol)
